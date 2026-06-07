@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home - PakLaw AI</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <nav class="nav-bar">
+      <a href="index.html" class="nav-brand">⚖ PakLaw AI</a>
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">☰</button>
+      <ul class="nav-menu" id="navMenu">
+        <li><a href="index.html" class="active">Home</a></li>
+        <li id="authLink"><a href="login.html" class="nav-btn nav-btn-secondary">Sign In</a></li>
+        <li id="joinLink"><a href="signup.html" class="nav-btn nav-btn-primary">Join</a></li>
+        <li id="changePasswordLink" style="display: none;"><a href="change-password.html">Change Password</a></li>
+        <li id="signOutLink" style="display: none;"><a href="#" onclick="handleSignOut(event)" class="nav-btn nav-btn-secondary">Sign Out</a></li>
+      </ul>
+    </nav>
+
+    <main class="main-content">
+      <div class="container container-narrow" style="padding-top: 4rem; padding-bottom: 4rem;">
+        <div class="text-center mb-6">
+          <h1 style="font-size: 2.25rem; font-weight: 700; tracking: -0.025em; margin-bottom: 0.5rem;">Legal Consistency Checker</h1>
+          <p style="color: var(--text-secondary); font-size: 0.95rem;">Verify proposed amendments against active federal statutes.</p>
+        </div>
+
+        <div class="card flex flex-col gap-4 mt-6">
+          <div class="grid grid-2 gap-4">
+            <a href="check.html" class="btn btn-secondary flex flex-col items-center justify-between" style="padding: 2rem; height: 160px; text-decoration: none; text-align: center; border-radius: var(--radius-lg);">
+              <span style="font-size: 1.5rem;">➕</span>
+              <span style="font-size: 1rem; font-weight: 600; color: var(--text-primary);">Check Consistency</span>
+              <span style="font-size: 0.75rem; color: var(--text-muted);">Paste draft text or upload files</span>
+            </a>
+
+            <a href="report.html" class="btn btn-secondary flex flex-col items-center justify-between" style="padding: 2rem; height: 160px; text-decoration: none; text-align: center; border-radius: var(--radius-lg);">
+              <span style="font-size: 1.5rem;">📋</span>
+              <span style="font-size: 1rem; font-weight: 600; color: var(--text-primary);">Analysis Report</span>
+              <span style="font-size: 0.75rem; color: var(--text-muted);">View conflict checks and severity data</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div>© 2026 PakLaw AI · Minimal Legal Prototype</div>
+    </footer>
+  </div>
+
+  <script>
+    // Mobile navigation toggle
+    const navToggle = document.getElementById('navToggle');
+    const navMenu = document.getElementById('navMenu');
+    if (navToggle && navMenu) {
+      navToggle.addEventListener('click', () => {
+        navMenu.classList.toggle('show');
+      });
+    }
+
+    // Handle mock auth state
+    const email = localStorage.getItem('pak_email');
+    const token = localStorage.getItem('pak_token');
+    if (email && token) {
+      const authLink = document.getElementById('authLink');
+      const joinLink = document.getElementById('joinLink');
+      const signOutLink = document.getElementById('signOutLink');
+      if (authLink) authLink.style.display = 'none';
+      if (joinLink) joinLink.style.display = 'none';
+      if (signOutLink) signOutLink.style.display = 'block';
+
+      const changePasswordLink = document.getElementById('changePasswordLink');
+      if (changePasswordLink) changePasswordLink.style.display = 'block';
+    }
+
+    function handleSignOut(e) {
+      if (e) e.preventDefault();
+      localStorage.removeItem('pak_email');
+      localStorage.removeItem('pak_token');
+      window.location.reload();
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+This diagram maps out the architecture of an **NLI-Based Law Consistency Checker**. It is a specialized Natural Language Processing (NLP) system designed to analyze legal texts (like laws, statutes, and contracts) to find contradictions, overlaps, or inconsistencies.
+
+The system operates as a top-down pipeline consisting of **8 main functional layers**, supported by **cross-cutting components** on the side.
+
+Here is a breakdown of how it works from top to bottom:
+
+---
+
+## 1. Data Ingestion Layer
+
+This is the entry point of the system. It ingests various **Legal Document Sources**, including:
+
+* Statutes / Acts
+* Regulations
+* Case Law
+* Amendments
+* Historical Versions
+
+## 2. Preprocessing & Legal Parsing Layer
+
+Once the documents are ingested, they are cleaned and broken down into machine-readable elements through:
+
+* **Clause Segmentation:** Splitting heavy legal text into individual sentences or clauses.
+* **Legal NER (Named Entity Recognition):** Identifying legal entities (e.g., specific organizations, roles, dates).
+* **Dependency Parsing:** Figuring out the grammatical structure of the legal text.
+* **Modality Detection:** Highlighting words that dictate obligation or permission (e.g., *Shall, May, Must*).
+* **Condition & Exception Extraction:** Isolating conditional legal statements (e.g., *"unless x happens"*).
+
+## 3. Knowledge Representation Layer
+
+This layer transforms the parsed text into structured knowledge formats using a hybrid approach:
+
+* **Symbolic Layer:** Translates legal rules into strict logic ($FOL$ / First-Order Logic).
+* **Legal Knowledge Graph (KG):** Maps out how different entities, clauses, citations, and overrides connect to one another.
+* **Neural Layer (Embeddings):** Uses modern AI Transformer models to turn the text into mathematical vector formats.
+
+## 4. Retrieval & Candidate Generation Layer
+
+Instead of comparing every single sentence in a massive database, this layer narrows down potential matches. It uses **Semantic Similarity Search** and **Citation Linking** to filter and select the **Top-k Relevant Clause Pairs** that might be in conflict.
+
+## 5. NLI (Natural Language Inference) Engine
+
+This is the core AI brain of the system. It pairs up two selected clauses:
+
+* **Clause A** (Premise) + **Clause B** (Hypothesis)
+* They are fed into a specialized legal AI model (**Legal-BERT** or **DeBERTa**).
+* The model classifies their relationship into three standard NLI categories: **Entailment** (they agree), **Contradiction** (they conflict), or **Neutral** (unrelated), alongside a confidence score.
+
+## 6. Consistency Reasoner Layer
+
+This layer looks beyond simple language matching to apply deep legal reasoning:
+
+* **Conflict Detection:** Flags direct or indirect contradictions.
+* **Exception Handling (*Lex Specialis*):** Understands that a specific law overrides a general law.
+* **Temporal Reasoning (*Lex Posterior*):** Understands that a newer law might override an older one.
+* **Multi-hop Logical Inference & Scoring:** Connects multiple pieces of logic to aggregate a final decision.
+
+## 7. Explanation & Justification Layer
+
+Legal experts will not trust an AI blindly, so this layer acts as an "Explainable AI" mechanism. It extracts evidence, provides a step-by-step reasoning trace, lists supporting citations, highlights uncertainty scores, and generates a **human-readable justification** for why a conflict exists.
+
+## 8. User Interface & API Layer
+
+The final delivery mechanism for the user. It includes a **Legal Query Interface** for searching/uploading text, a **Dashboard** for visualizing conflicts, tools to export reports (PDF, JSON, CSV), and APIs to plug the engine into external legal tech software.
+
+---
+
+## Cross-Cutting Components (The Right Sidebar)
+
+These are background services that support every single layer of the architecture simultaneously:
+
+* **Data Governance & Version Control:** Tracks changes in laws over time.
+* **Security & Access Control:** Protects sensitive or confidential legal data.
+* **Audit Trail & Logging:** Keeps a record of system actions for accountability.
+* **Human-in-the-Loop Feedback:** Allows legal experts to correct the AI, improving the system over time.
+* **Model Monitoring & Continuous Improvement:** Ensures the underlying AI models remain accurate and don't degrade.

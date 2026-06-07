@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In - PakLaw AI</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <main class="main-content flex justify-between items-center" style="justify-content: center; padding: 3rem 1rem; flex-direction: column; gap: 1.5rem; min-height: calc(100vh - 100px);">
+      <a href="index.html" style="font-size: 1.75rem; font-weight: 700; text-decoration: none; color: var(--text-primary); letter-spacing: -0.03em;">⚖ PakLaw AI</a>
+      <div class="card container-narrow">
+        <h1 class="card-title text-center">Sign in</h1>
+        <p class="card-subtitle text-center">Access your PakLaw AI legal dashboard</p>
+        
+        <form id="loginForm" onsubmit="handleLogin(event)" class="flex flex-col gap-4">
+          <div class="form-group">
+            <label for="email" class="form-label">Email address</label>
+            <input type="email" id="email" class="form-input" placeholder="name@domain.com" required>
+          </div>
+          
+          <div class="form-group">
+            <div class="flex justify-between items-center mb-2">
+              <label for="password" class="form-label" style="margin-bottom: 0;">Password</label>
+              <a href="forgot-password.html" style="font-size: 0.8rem; color: var(--text-secondary); text-decoration: none;">Forgot password?</a>
+            </div>
+            <input type="password" id="password" class="form-input" placeholder="••••••••" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-checkbox-group">
+              <input type="checkbox" class="form-checkbox"> Remember this device
+            </label>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full mt-4">Sign In</button>
+        </form>
+        
+        <p class="text-center mt-6" style="font-size: 0.875rem; color: var(--text-secondary);">
+          Don't have an account? <a href="signup.html" style="color: var(--text-primary); font-weight: 600; text-decoration: none;">Create one</a>
+        </p>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div>© 2026 PakLaw AI · Minimal Legal Prototype</div>
+    </footer>
+  </div>
+
+  <script>
+    function handleLogin(e) {
+      e.preventDefault();
+      localStorage.setItem('pak_email', document.getElementById('email').value);
+      localStorage.setItem('pak_token', 'mock-token-session-123');
+      window.location.href = 'index.html';
+    }
+  </script>
+</body>
+</html>

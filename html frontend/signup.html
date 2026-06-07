@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create Account - PakLaw AI</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .hidden {
+      display: none !important;
+    }
+    .otp-inputs-container {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin: 1.25rem 0;
+    }
+    .otp-digit-input {
+      width: 48px;
+      height: 52px;
+      font-size: 1.50rem;
+      font-weight: 700;
+      text-align: center;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      color: var(--text-primary);
+      transition: var(--transition);
+    }
+    .otp-digit-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.1);
+      outline: none;
+    }
+    .shake-animation {
+      animation: shake 0.4s ease;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+    .mock-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0.35rem 0.75rem;
+      background-color: var(--bg-secondary);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      font-weight: 550;
+      margin-top: 0.75rem;
+      transition: transform 0.2s ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <main class="main-content flex justify-between items-center" style="justify-content: center; padding: 3rem 1rem; flex-direction: column; gap: 1.5rem; min-height: calc(100vh - 100px);">
+      <a href="index.html" style="font-size: 1.75rem; font-weight: 700; text-decoration: none; color: var(--text-primary); letter-spacing: -0.03em;">⚖ PakLaw AI</a>
+      <div class="card container-narrow">
+        <h1 class="card-title text-center">Create an account</h1>
+        <p class="card-subtitle text-center">Get started with automated statute consistency audits</p>
+        
+        <form id="signupForm" onsubmit="handleSignup(event)" class="flex flex-col gap-4">
+          <div class="form-group">
+            <label for="fullname" class="form-label">Full name</label>
+            <input type="text" id="fullname" class="form-input" placeholder="Your Name" required>
+          </div>
+
+          <div class="form-group">
+            <label for="email" class="form-label">Email address</label>
+            <input type="email" id="email" class="form-input" placeholder="name@domain.com" required>
+          </div>
+          
+          <div class="form-group">
+            <label for="password" class="form-label">Password</label>
+            <input type="password" id="password" class="form-input" placeholder="••••••••" required>
+          </div>
+
+          <div class="form-group">
+            <label for="confirmPassword" class="form-label">Confirm password</label>
+            <input type="password" id="confirmPassword" class="form-input" placeholder="••••••••" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-checkbox-group">
+              <input type="checkbox" class="form-checkbox" required> I agree to the terms and privacy conditions
+            </label>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full mt-4">Create Account</button>
+        </form>
+
+        <!-- OTP Verification Form -->
+        <form id="otpForm" onsubmit="handleVerifyOTP(event)" class="flex flex-col gap-4 hidden">
+          <div class="text-center mb-2">
+            <p style="font-size: 0.875rem; color: var(--text-secondary);">We've sent a 6-digit verification code to:</p>
+            <p style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary); margin-top: 0.25rem;" id="otpEmail"></p>
+          </div>
+
+          <div class="form-group" style="margin-top: 1rem;">
+            <label class="form-label text-center">Verification Code</label>
+            <div class="otp-inputs-container" style="justify-content: center; gap: 0.5rem;">
+              <input type="text" maxlength="1" class="otp-digit-input" required pattern="[0-9]">
+              <input type="text" maxlength="1" class="otp-digit-input" required pattern="[0-9]">
+              <input type="text" maxlength="1" class="otp-digit-input" required pattern="[0-9]">
+              <input type="text" maxlength="1" class="otp-digit-input" required pattern="[0-9]">
+              <input type="text" maxlength="1" class="otp-digit-input" required pattern="[0-9]">
+              <input type="text" maxlength="1" class="otp-digit-input" required pattern="[0-9]">
+            </div>
+            <div id="otpError" style="color: var(--severity-high); font-size: 0.8rem; text-align: center; margin-top: 0.5rem; display: none;"></div>
+            <div id="otpSuccess" style="color: #10b981; font-size: 0.8rem; text-align: center; margin-top: 0.5rem; display: none;"></div>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full">Verify & Create Account</button>
+
+          <button type="button" onclick="goBackToRegister()" class="btn btn-secondary btn-full">← Go Back</button>
+
+          <p class="text-center mt-4" style="font-size: 0.875rem; color: var(--text-secondary);">
+            Didn't receive the code? <a href="#" onclick="resendOTP(event)" style="color: var(--text-primary); font-weight: 600; text-decoration: none;">Resend Code</a>
+          </p>
+        </form>
+        
+        <p class="text-center mt-6" style="font-size: 0.875rem; color: var(--text-secondary);">
+          Already have an account? <a href="login.html" style="color: var(--text-primary); font-weight: 600; text-decoration: none;">Sign in instead</a>
+        </p>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div>© 2026 PakLaw AI · Minimal Legal Prototype</div>
+    </footer>
+  </div>
+
+  <script>
+    let generatedOtp = '';
+    let registrationData = {};
+
+    function handleSignup(e) {
+      e.preventDefault();
+      const pwd = document.getElementById('password').value;
+      const cpwd = document.getElementById('confirmPassword').value;
+      if (pwd !== cpwd) {
+        alert('Passwords do not match.');
+        return;
+      }
+      
+      // Store data temporarily
+      registrationData = {
+        fullName: document.getElementById('fullname').value,
+        email: document.getElementById('email').value,
+        password: pwd
+      };
+      
+      generateAndShowOTP();
+    }
+
+    function generateAndShowOTP() {
+      // Set mock OTP to "000000"
+      generatedOtp = "000000";
+      
+      // Update UI elements
+      document.getElementById('otpEmail').textContent = registrationData.email;
+      
+      // Toggle visibility
+      document.getElementById('signupForm').classList.add('hidden');
+      document.getElementById('otpForm').classList.remove('hidden');
+      
+      // Reset status messages
+      document.getElementById('otpError').style.display = 'none';
+      document.getElementById('otpSuccess').style.display = 'none';
+      
+      // Focus on first input
+      setTimeout(() => {
+        const firstInput = document.querySelector('.otp-digit-input');
+        if (firstInput) {
+          firstInput.focus();
+        }
+      }, 100);
+    }
+
+    function handleVerifyOTP(e) {
+      if (e) e.preventDefault();
+      
+      const digitInputs = document.querySelectorAll('.otp-digit-input');
+      const digits = Array.from(digitInputs).map(el => el.value).join('');
+      
+      const errorEl = document.getElementById('otpError');
+      const successEl = document.getElementById('otpSuccess');
+      
+      if (digits === generatedOtp) {
+        errorEl.style.display = 'none';
+        successEl.style.display = 'block';
+        successEl.textContent = "OTP verified successfully! Creating account...";
+        
+        // Save to localStorage
+        localStorage.setItem('pak_token', 'mock-token-session-' + Math.random().toString(36).substr(2, 9));
+        localStorage.setItem('pak_email', registrationData.email);
+        localStorage.setItem('pak_name', registrationData.fullName);
+        
+        setTimeout(() => {
+          window.location.href = 'index.html';
+        }, 1200);
+      } else {
+        successEl.style.display = 'none';
+        errorEl.style.display = 'block';
+        errorEl.textContent = "Invalid OTP code. Please check and try again.";
+        
+        // Visual indicator: shake form and highlight inputs red
+        const otpForm = document.getElementById('otpForm');
+        otpForm.classList.add('shake-animation');
+        digitInputs.forEach(el => {
+          el.style.borderColor = 'var(--severity-high)';
+        });
+        
+        setTimeout(() => {
+          otpForm.classList.remove('shake-animation');
+          digitInputs.forEach(el => {
+            el.style.borderColor = '';
+          });
+        }, 1000);
+      }
+    }
+
+    function resendOTP(e) {
+      if (e) e.preventDefault();
+      generateAndShowOTP();
+    }
+
+    function goBackToRegister() {
+      // Clear inputs
+      document.querySelectorAll('.otp-digit-input').forEach(el => el.value = '');
+      
+      // Toggle visibility
+      document.getElementById('otpForm').classList.add('hidden');
+      document.getElementById('signupForm').classList.remove('hidden');
+    }
+
+    // Auto-focus and handling digits behavior
+    document.addEventListener('DOMContentLoaded', () => {
+      const inputs = document.querySelectorAll('.otp-digit-input');
+      inputs.forEach((input, index) => {
+        // Enforce digits only on keypress / input
+        input.addEventListener('input', (e) => {
+          e.target.value = e.target.value.replace(/[^0-9]/g, '');
+          const val = e.target.value;
+          if (val && val.length === 1 && index < inputs.length - 1) {
+            inputs[index + 1].focus();
+          }
+        });
+
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Backspace' && !e.target.value && index > 0) {
+            inputs[index - 1].focus();
+          }
+        });
+
+        input.addEventListener('paste', (e) => {
+          e.preventDefault();
+          const pastedData = (e.clipboardData || window.clipboardData).getData('text').trim();
+          if (pastedData && /^\d{6}$/.test(pastedData)) {
+            for (let i = 0; i < inputs.length; i++) {
+              inputs[i].value = pastedData[i];
+            }
+            // Trigger verify submit automatically
+            handleVerifyOTP();
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

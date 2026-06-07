@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users collection
+    match /users/{userId} {
+      // Anyone can create their own user doc (during signup)
+      allow create: if request.auth != null && request.auth.uid == userId;
+      // Only the owner can read/update their own doc
+      allow read, update: if request.auth != null && request.auth.uid == userId;
+      // Admins can read all users
+      allow read: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+      // No one can delete user docs from client
+      allow delete: if false;
+    }
+
+  }
+}

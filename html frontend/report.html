@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analysis Report - PakLaw AI</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <nav class="nav-bar">
+      <a href="index.html" class="nav-brand">⚖ PakLaw AI</a>
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">☰</button>
+      <ul class="nav-menu" id="navMenu">
+        <li><a href="index.html">Home</a></li>
+        <li id="authLink"><a href="login.html" class="nav-btn nav-btn-secondary">Sign In</a></li>
+        <li id="joinLink"><a href="signup.html" class="nav-btn nav-btn-primary">Join</a></li>
+        <li id="changePasswordLink" style="display: none;"><a href="change-password.html">Change Password</a></li>
+        <li id="signOutLink" style="display: none;"><a href="#" onclick="handleSignOut(event)" class="nav-btn nav-btn-secondary">Sign Out</a></li>
+      </ul>
+    </nav>
+
+    <main class="main-content">
+      <div class="container" style="padding-top: 3rem; padding-bottom: 3rem;">
+        
+        <div class="flex justify-between items-center mb-6" style="flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h1 style="font-size: 1.75rem; font-weight: 700; tracking: -0.02em; margin-bottom: 0.25rem;">Analysis Report</h1>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">5 potential conflicts detected against reference statutes.</p>
+          </div>
+          
+          <a href="check.html" class="btn btn-secondary" style="font-size: 0.85rem;">🔄 Run New Check</a>
+        </div>
+
+        <!-- Filter Buttons -->
+        <div class="filter-bar">
+          <button class="filter-btn active" onclick="filterReport('all')">All (5)</button>
+          <button class="filter-btn" onclick="filterReport('high')">High Severity (2)</button>
+          <button class="filter-btn" onclick="filterReport('medium')">Medium Overlap (2)</button>
+          <button class="filter-btn" onclick="filterReport('low')">Low Exception (1)</button>
+        </div>
+
+        <!-- Report items list -->
+        <div class="flex flex-col gap-4" id="reportList">
+          
+          <!-- Card 1 (High Conflict) -->
+          <div class="report-card" data-severity="high">
+            <div class="report-header">
+              <div>
+                <span class="badge badge-high" style="margin-bottom: 0.5rem;">High Conflict (94.2%)</span>
+                <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary);">PPC Section 379: Punishment for Theft</h3>
+              </div>
+              <button class="btn btn-secondary" onclick="showModal('detail1', 'PPC Section 379: Punishment for Theft', '<span class=\'badge badge-high\'>High Conflict (94.2%)</span>')" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;">Details</button>
+            </div>
+            <p style="font-size: 0.875rem; color: var(--text-secondary);">Direct contradiction regarding maximum imprisonment terms (5 years draft vs 3 years active statute).</p>
+            
+            <div id="detail1" class="clause-comparison" style="display: none;">
+              <div class="clause-panel">
+                <strong>Proposed Draft Amendment</strong>
+                <p>"...theft of property shall be punished with imprisonment of either description for a term which may extend to five years..."</p>
+              </div>
+              <div class="clause-panel">
+                <strong>Active Federal Statute</strong>
+                <p>"Whoever commits theft shall be punished with imprisonment... for a term which may extend to three years..."</p>
+              </div>
+              <div style="grid-column: 1 / -1; font-size: 0.8rem; border-top: 1px solid var(--border-light); padding-top: 0.75rem;">
+                <span style="font-weight: 600; color: var(--text-primary);">Heuristics:</span> Lex Posterior applies (newer provision), Lex Specialis not detected. No exemption tags.
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2 (High Conflict) -->
+          <div class="report-card" data-severity="high">
+            <div class="report-header">
+              <div>
+                <span class="badge badge-high" style="margin-bottom: 0.5rem;">High Conflict (88.1%)</span>
+                <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary);">PPC Section 378: Definition of Theft</h3>
+              </div>
+              <button class="btn btn-secondary" onclick="showModal('detail2', 'PPC Section 378: Definition of Theft', '<span class=\'badge badge-high\'>High Conflict (88.1%)</span>')" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;">Details</button>
+            </div>
+            <p style="font-size: 0.875rem; color: var(--text-secondary);">Overlap with primary definitions of movable property possession overrides.</p>
+            
+            <div id="detail2" class="clause-comparison" style="display: none;">
+              <div class="clause-panel">
+                <strong>Proposed Draft Amendment</strong>
+                <p>"...moves the asset with intent to permanently deprive the possessor thereof..."</p>
+              </div>
+              <div class="clause-panel">
+                <strong>Active Federal Statute</strong>
+                <p>"Whoever, intending to take dishonestly any moveable property out of the possession of any person..."</p>
+              </div>
+              <div style="grid-column: 1 / -1; font-size: 0.8rem; border-top: 1px solid var(--border-light); padding-top: 0.75rem;">
+                <span style="font-weight: 600; color: var(--text-primary);">Heuristics:</span> Scope overlap. Definition of "asset" includes digital assets, whereas PPC refers to "moveable property".
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 3 (Medium Conflict) -->
+          <div class="report-card" data-severity="medium">
+            <div class="report-header">
+              <div>
+                <span class="badge badge-medium" style="margin-bottom: 0.5rem;">Medium Overlap (72.4%)</span>
+                <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary);">PECA Section 14: Cyber-Enabled Theft</h3>
+              </div>
+              <button class="btn btn-secondary" onclick="showModal('detail3', 'PECA Section 14: Cyber-Enabled Theft', '<span class=\'badge badge-medium\'>Medium Overlap (72.4%)</span>')" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;">Details</button>
+            </div>
+            <p style="font-size: 0.875rem; color: var(--text-secondary);">Potential domain overlap concerning electronic signatures and digital ledger transactions.</p>
+            
+            <div id="detail3" class="clause-comparison" style="display: none;">
+              <div class="clause-panel">
+                <strong>Proposed Draft Amendment</strong>
+                <p>"...unauthorised transfer of digital ledger certificates or balances by electronic credentials..."</p>
+              </div>
+              <div class="clause-panel">
+                <strong>Active Federal Statute</strong>
+                <p>"Whoever commits electronic fraud or unauthorised access of data devices with intent to commit theft..."</p>
+              </div>
+              <div style="grid-column: 1 / -1; font-size: 0.8rem; border-top: 1px solid var(--border-light); padding-top: 0.75rem;">
+                <span style="font-weight: 600; color: var(--text-primary);">Heuristics:</span> Lex Specialis applies (PECA is special law for cyber crimes). Recommending clarification references.
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 4 (Medium Conflict) -->
+          <div class="report-card" data-severity="medium">
+            <div class="report-header">
+              <div>
+                <span class="badge badge-medium" style="margin-bottom: 0.5rem;">Medium Overlap (65.3%)</span>
+                <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary);">Anti-Terrorism Act, 1997 — Section 7</h3>
+              </div>
+              <button class="btn btn-secondary" onclick="showModal('detail4', 'Anti-Terrorism Act, 1997 — Section 7', '<span class=\'badge badge-medium\'>Medium Overlap (65.3%)</span>')" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;">Details</button>
+            </div>
+            <p style="font-size: 0.875rem; color: var(--text-secondary);">Possession of property by coercive or armed extortion groups.</p>
+            
+            <div id="detail4" class="clause-comparison" style="display: none;">
+              <div class="clause-panel">
+                <strong>Proposed Draft Amendment</strong>
+                <p>"...obtaining control of property under fear of instant physical injury to life or limb..."</p>
+              </div>
+              <div class="clause-panel">
+                <strong>Active Federal Statute</strong>
+                <p>"Whoever commits an act of terrorism, extortion, or coercive acquisition of property by weapon-point..."</p>
+              </div>
+              <div style="grid-column: 1 / -1; font-size: 0.8rem; border-top: 1px solid var(--border-light); padding-top: 0.75rem;">
+                <span style="font-weight: 600; color: var(--text-primary);">Heuristics:</span> Punitive discrepancies. ATA overrides normal penal codes where terror threat elements are established.
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 5 (Low Conflict) -->
+          <div class="report-card" data-severity="low">
+            <div class="report-header">
+              <div>
+                <span class="badge badge-low" style="margin-bottom: 0.5rem;">Low Exception (45.0%)</span>
+                <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary);">Constitution of Pakistan — Article 24</h3>
+              </div>
+              <button class="btn btn-secondary" onclick="showModal('detail5', 'Constitution of Pakistan — Article 24', '<span class=\'badge badge-low\'>Low Exception (45.0%)</span>')" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;">Details</button>
+            </div>
+            <p style="font-size: 0.875rem; color: var(--text-secondary);">Constitutional protections against unlawful deprivation of private property.</p>
+            
+            <div id="detail5" class="clause-comparison" style="display: none;">
+              <div class="clause-panel">
+                <strong>Proposed Draft Amendment</strong>
+                <p>"...confiscation of items acquired through unlawful or unauthorized access prior to conviction..."</p>
+              </div>
+              <div class="clause-panel">
+                <strong>Active Federal Statute</strong>
+                <p>"No person shall be deprived of his property save in accordance with law..."</p>
+              </div>
+              <div style="grid-column: 1 / -1; font-size: 0.8rem; border-top: 1px solid var(--border-light); padding-top: 0.75rem;">
+                <span style="font-weight: 600; color: var(--text-primary);">Heuristics:</span> Possible constitutional boundary issue. Ensure proper due process clauses are explicitly added.
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div>© 2026 PakLaw AI · Minimal Legal Prototype</div>
+    </footer>
+
+    <!-- Modal Detail Popup -->
+    <div id="detailModal" class="modal-overlay" onclick="closeModal()">
+      <div class="modal-card" onclick="event.stopPropagation()">
+        <button class="modal-close-btn" onclick="closeModal()">&times;</button>
+        <div class="modal-header">
+          <div id="modalBadgeContainer"></div>
+          <h2 id="modalTitle" style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin-top: 0.5rem;"></h2>
+        </div>
+        <div id="modalBody" class="clause-comparison"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Mobile navigation toggle
+    const navToggle = document.getElementById('navToggle');
+    const navMenu = document.getElementById('navMenu');
+    if (navToggle && navMenu) {
+      navToggle.addEventListener('click', () => {
+        navMenu.classList.toggle('show');
+      });
+    }
+
+    // Handle mock auth state for nav bar
+    const email = localStorage.getItem('pak_email');
+    const token = localStorage.getItem('pak_token');
+    if (email && token) {
+      const authLink = document.getElementById('authLink');
+      const joinLink = document.getElementById('joinLink');
+      const signOutLink = document.getElementById('signOutLink');
+      const changePasswordLink = document.getElementById('changePasswordLink');
+      if (authLink) authLink.style.display = 'none';
+      if (joinLink) joinLink.style.display = 'none';
+      if (signOutLink) signOutLink.style.display = 'block';
+      if (changePasswordLink) changePasswordLink.style.display = 'block';
+    }
+
+    function handleSignOut(e) {
+      if (e) e.preventDefault();
+      localStorage.removeItem('pak_email');
+      localStorage.removeItem('pak_token');
+      window.location.reload();
+    }
+
+    // Modal popup helper functions
+    function showModal(detailId, title, badgeHTML) {
+      const detailEl = document.getElementById(detailId);
+      const modalTitle = document.getElementById('modalTitle');
+      const modalBadge = document.getElementById('modalBadgeContainer');
+      const modalBody = document.getElementById('modalBody');
+      
+      modalTitle.textContent = title;
+      modalBadge.innerHTML = badgeHTML;
+      modalBody.innerHTML = detailEl.innerHTML;
+      
+      document.getElementById('detailModal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('detailModal').classList.remove('active');
+    }
+
+    // Severity level switching filter
+    function filterReport(severity) {
+      // Toggle active states on filter buttons
+      const buttons = document.querySelectorAll('.filter-btn');
+      buttons.forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+
+      // Toggle display of cards
+      const cards = document.querySelectorAll('.report-card');
+      cards.forEach(card => {
+        if (severity === 'all' || card.getAttribute('data-severity') === severity) {
+          card.style.display = 'block';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+  </script>
+</body>
+</html>
