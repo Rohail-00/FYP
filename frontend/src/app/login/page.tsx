@@ -9,7 +9,7 @@ import { Scale } from "lucide-react";
 export default function LoginPage() {
   const { login, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
-  const [identifier, setIdentifier] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,7 +25,7 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const result = await login(identifier, password);
+    const result = await login(email, password);
     setLoading(false);
     if (result.ok) {
       router.push("/");
@@ -55,12 +55,12 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="form-group">
-            <label htmlFor="identifier" className="form-label">Email or Username</label>
+            <label htmlFor="email" className="form-label">Email Address</label>
             <input
-              type="text" id="identifier" className="form-input"
-              placeholder="name@domain.com or username"
-              value={identifier} onChange={(e) => setIdentifier(e.target.value)}
-              required autoComplete="username"
+              type="email" id="email" className="form-input"
+              placeholder="name@domain.com"
+              value={email} onChange={(e) => setEmail(e.target.value)}
+              required autoComplete="email"
             />
           </div>
 

@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { useRepo } from "@/context/RepoContext";
+import { Database } from "lucide-react";
 
 interface LawItem {
   id: string;
@@ -17,11 +19,15 @@ interface LawItem {
 
 export default function SearchPage() {
   const { isAuthenticated, isLoading } = useAuth();
+  const { repos } = useRepo();
   const router = useRouter();
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedRepo, setSelectedRepo] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [selectedLaw, setSelectedLaw] = useState<LawItem | null>(null);
+
+  const activeRepo = repos.find((repo) => repo.id === selectedRepo);
 
   const laws: LawItem[] = [
     {
@@ -138,20 +144,85 @@ export default function SearchPage() {
             Federal Statutes Search
           </h1>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-            Look up active statutory clauses, sections, and penal code details.
+            Search active statutes or clauses within one of your repositories.
           </p>
         </div>
 
-        {/* Search Input */}
-        <div className="form-group mb-6" style={{ maxWidth: "600px" }}>
-          <input
-            type="text"
-            className="form-input"
-            placeholder="Search by keywords, sections, or law titles (e.g. theft, Article 24)..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ padding: "0.85rem 1.25rem", fontSize: "0.95rem" }}
-          />
+        <div
+          className="card"
+          style={{
+            maxWidth: "760px",
+            marginBottom: "1.5rem",
+            padding: "1.25rem",
+          }}
+        >
+          <div className="form-group" style={{ marginBottom: "1rem" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                marginBottom: "0.6rem",
+              }}
+            >
+              <Database size={16} strokeWidth={2} style={{ color: "var(--accent)" }} />
+              <label
+                htmlFor="search-repo-select"
+                className="form-label"
+                style={{ fontWeight: 600, marginBottom: 0 }}
+              >
+                Search Scope
+              </label>
+            </div>
+            <select
+              id="search-repo-select"
+              className="form-input"
+              value={selectedRepo}
+              onChange={(e) => setSelectedRepo(e.target.value)}
+            >
+              <option value="all">All PakLaw Statutes</option>
+              {repos.map((repo) => (
+                <option key={repo.id} value={repo.id}>
+                  {repo.name}
+                  {repo.files.length > 0
+                    ? ` (${repo.files.length} file${repo.files.length !== 1 ? "s" : ""})`
+                    : " (empty)"}
+                </option>
+              ))}
+            </select>
+            <p
+              style={{
+                marginTop: "0.45rem",
+                fontSize: "0.75rem",
+                color: "var(--text-muted)",
+              }}
+            >
+              {activeRepo
+                ? activeRepo.files.length > 0
+                  ? `Search will be limited to clauses indexed from ${activeRepo.name}.`
+                  : `${activeRepo.name} is empty. Add documents before repository search can return clauses.`
+                : "Search across the complete PakLaw statutory collection."}
+            </p>
+          </div>
+
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label htmlFor="law-search-query" className="form-label">
+              Clause, Section, or Keyword
+            </label>
+            <input
+              id="law-search-query"
+              type="text"
+              className="form-input"
+              placeholder={
+                activeRepo
+                  ? `Search within ${activeRepo.name}...`
+                  : "Search by keywords, sections, or law titles (e.g. theft, Article 24)..."
+              }
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ padding: "0.85rem 1.25rem", fontSize: "0.95rem" }}
+            />
+          </div>
         </div>
 
         {/* Category Filters */}
@@ -168,6 +239,23 @@ export default function SearchPage() {
         </div>
 
         {/* Search Results */}
+        <div
+          className="flex justify-between items-center mt-4"
+          style={{ flexWrap: "wrap", gap: "0.5rem" }}
+        >
+          <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+            Showing {filteredLaws.length} result{filteredLaws.length !== 1 ? "s" : ""} from{" "}
+            <strong style={{ color: "var(--text-primary)" }}>
+              {activeRepo?.name ?? "All PakLaw Statutes"}
+            </strong>
+          </p>
+          {activeRepo && (
+            <span className="badge badge-low">
+              Repository Scope
+            </span>
+          )}
+        </div>
+
         <div className="flex flex-col gap-4 mt-4">
           {filteredLaws.length > 0 ? (
             filteredLaws.map((law) => (

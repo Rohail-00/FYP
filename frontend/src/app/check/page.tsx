@@ -3,14 +3,31 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { useRepo } from "@/context/RepoContext";
+import { Database, AlertCircle } from "lucide-react";
+
+const ACCEPTED = [".pdf", ".doc", ".docx", ".txt"];
+const ACCEPTED_MIME = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 export default function CheckPage() {
   const { isAuthenticated, isLoading } = useAuth();
+  const { repos } = useRepo();
   const router = useRouter();
+
+  // Repository selection
+  const [selectedRepo, setSelectedRepo] = useState("none");
 
   // Form & upload state
   const [draftText, setDraftText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState("");
   
   // Submission indicator state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,10 +65,42 @@ export default function CheckPage() {
     fileInputRef.current?.click();
   };
 
+  const handleFile = (file: File) => {
+    setError("");
+    const isAccepted =
+      ACCEPTED_MIME.includes(file.type) ||
+      ACCEPTED.some((ext) => file.name.toLowerCase().endsWith(ext));
+
+    if (!isAccepted) {
+      setError("Only PDF, DOCX, and TXT files are accepted.");
+      setFileName(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      setError("File exceeds the 10 MB limit.");
+      setFileName(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    setFileName(file.name);
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setFileName(file.name);
+      handleFile(file);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      handleFile(file);
     }
   };
 
@@ -86,6 +135,13 @@ export default function CheckPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
+
+    if (!draftText.trim() && !fileName) {
+      setError("Please provide either draft clause text or upload a document file.");
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitBtnText("Running Neural-Symbolic Check...");
 
@@ -117,6 +173,60 @@ export default function CheckPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="card flex flex-col gap-6">
+
+          {/* ── Repository Selector ── */}
+          <div
+            style={{
+              padding: "1rem 1.25rem",
+              background: "var(--bg-secondary)",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--border-light)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                marginBottom: "0.6rem",
+              }}
+            >
+              <Database size={15} strokeWidth={2} style={{ color: "var(--accent)" }} />
+              <label
+                htmlFor="repo-select"
+                className="form-label"
+                style={{ fontWeight: 600, marginBottom: 0, fontSize: "0.85rem" }}
+              >
+                Knowledge Base
+              </label>
+            </div>
+            <select
+              id="repo-select"
+              className="form-input"
+              value={selectedRepo}
+              onChange={(e) => setSelectedRepo(e.target.value)}
+              style={{ fontSize: "0.88rem" }}
+            >
+              <option value="none">None — scan all Pak Law PDFs (default)</option>
+              {repos.map((r) => (
+                <option key={r.id} value={r.id}>
+                  📁 {r.name}{r.files.length > 0 ? ` (${r.files.length} file${r.files.length !== 1 ? "s" : ""})` : " (empty)"}
+                </option>
+              ))}
+            </select>
+            <p
+              style={{
+                marginTop: "0.45rem",
+                fontSize: "0.75rem",
+                color: "var(--text-muted)",
+              }}
+            >
+              {selectedRepo === "none"
+                ? "Analysis will run against all Pak Law PDFs in the system."
+                : `Analysis will be scoped to the files in your selected repository.`}
+            </p>
+          </div>
+
           <div className="form-group">
             <div className="flex justify-between items-center mb-2" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
               <label htmlFor="draftText" className="form-label" style={{ fontWeight: 600, marginBottom: 0 }}>
@@ -167,7 +277,7 @@ export default function CheckPage() {
               placeholder="Paste the text of the proposed statutory amendment or clause here..."
               value={draftText}
               onChange={(e) => setDraftText(e.target.value)}
-              required
+              required={!fileName}
             />
           </div>
 
@@ -175,10 +285,23 @@ export default function CheckPage() {
             <label className="form-label" style={{ fontWeight: 600 }}>
               Or Upload Document File
             </label>
-            <div className="upload-dropzone" onClick={triggerFileInput}>
+            <div
+              className={`upload-dropzone ${dragOver ? "upload-dropzone-active" : ""}`}
+              style={{
+                borderColor: dragOver ? "var(--accent)" : undefined,
+                background: dragOver ? "var(--bg-tertiary)" : undefined,
+              }}
+              onClick={triggerFileInput}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+            >
               <div className="upload-icon">📂</div>
               <div style={{ fontSize: "0.85rem", fontWeight: 500, color: "var(--text-primary)" }}>
-                Click to select files or drag them here
+                Click to select files or drag & drop here
               </div>
               <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
                 PDF, DOCX, or TXT up to 10MB
@@ -186,6 +309,7 @@ export default function CheckPage() {
               <input
                 type="file"
                 ref={fileInputRef}
+                accept=".pdf,.doc,.docx,.txt"
                 style={{ display: "none" }}
                 onChange={handleFileChange}
               />
@@ -203,6 +327,26 @@ export default function CheckPage() {
               </div>
             )}
           </div>
+
+          {/* ── Error ── */}
+          {error && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                padding: "0.65rem 1rem",
+                borderRadius: "var(--radius-md)",
+                background: "var(--severity-high-bg)",
+                border: "1px solid var(--severity-high-border)",
+                fontSize: "0.82rem",
+                color: "var(--severity-high)",
+              }}
+            >
+              <AlertCircle size={15} />
+              <span>{error}</span>
+            </div>
+          )}
 
           <button type="submit" disabled={isSubmitting} className="btn btn-primary btn-full mt-2">
             {submitBtnText}

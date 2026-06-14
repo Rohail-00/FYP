@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 
 export const Navbar: React.FC = () => {
-  const { isAuthenticated, logout, name: contextName, role } = useAuth();
+  const { isAuthenticated, logout, name: contextName } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [displayName, setDisplayName] = useState("Profile");
@@ -31,7 +31,7 @@ export const Navbar: React.FC = () => {
   // Sync display name from context/localStorage
   useEffect(() => {
     if (isAuthenticated) {
-      const storedName = localStorage.getItem("pak_name") || contextName || "Law Officer";
+      const storedName = contextName || localStorage.getItem("pak_name") || "Law Officer";
       setDisplayName(storedName);
     }
   }, [isAuthenticated, contextName]);
@@ -75,7 +75,6 @@ export const Navbar: React.FC = () => {
     router.push(path);
   };
 
-  const isAdmin = role === "admin";
 
   // Shared dropdown item styling
   const itemStyle: React.CSSProperties = {
@@ -127,13 +126,16 @@ export const Navbar: React.FC = () => {
                 Search Laws
               </Link>
             </li>
-            {isAdmin && (
-              <li>
-                <Link href="/admin/add-law" className={pathname === "/admin/add-law" ? "active" : ""}>
-                  Add Law
-                </Link>
-              </li>
-            )}
+            <li>
+              <Link href="/repositories" className={pathname === "/repositories" ? "active" : ""}>
+                My Repositories
+              </Link>
+            </li>
+            <li>
+              <Link href="/multi-analysis" className={pathname === "/multi-analysis" ? "active" : ""}>
+                Multi-File Analysis
+              </Link>
+            </li>
 
             {/* Settings dropdown */}
             <li style={{ position: "relative" }} ref={dropdownRef}>
@@ -182,7 +184,7 @@ export const Navbar: React.FC = () => {
                   <div style={{ padding: "0.5rem 1rem 0.6rem", borderBottom: "1px solid var(--border-light)", marginBottom: "0.35rem" }}>
                     <p style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: "0.1rem" }}>{displayName}</p>
                     <p style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                      {isAdmin ? "Administrator" : "User"}
+                      User
                     </p>
                   </div>
 

@@ -13,7 +13,7 @@ interface AuditHistoryItem {
 }
 
 export default function ProfilePage() {
-  const { isAuthenticated, isLoading, name: authName, email: authEmail } = useAuth();
+  const { isAuthenticated, isLoading, name: authName, email: authEmail, updateDisplayName } = useAuth();
   const router = useRouter();
 
   // Profile fields state
@@ -51,15 +51,18 @@ export default function ProfilePage() {
   // Load profile details from localStorage
   useEffect(() => {
     if (isAuthenticated) {
-      setName(localStorage.getItem("pak_name") || authName || "Law Officer");
+      setName(authName || localStorage.getItem("pak_name") || "Law Officer");
       setDesignation(localStorage.getItem("pak_designation") || "Senior Legal Auditor");
       setDepartment(localStorage.getItem("pak_department") || "Federal Law Review Division");
       setAvatar(localStorage.getItem("pak_avatar") || null);
     }
   }, [isAuthenticated, authName]);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (name.trim()) {
+      await updateDisplayName(name.trim());
+    }
     localStorage.setItem("pak_name", name);
     localStorage.setItem("pak_designation", designation);
     localStorage.setItem("pak_department", department);
@@ -71,8 +74,6 @@ export default function ProfilePage() {
     setSaveSuccess(true);
     setTimeout(() => {
       setSaveSuccess(false);
-      // Force reload to update Navbar name hook sync
-      window.location.reload();
     }, 1000);
   };
 

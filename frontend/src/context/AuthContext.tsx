@@ -17,13 +17,10 @@ import {
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
-type UserRole = "user" | "admin";
-
 interface AppUser {
   uid: string;
   name: string;
   email: string;
-  role: UserRole;
   emailVerified: boolean;
 }
 
@@ -33,7 +30,6 @@ interface AuthContextType {
   // Convenience aliases kept for existing component compatibility
   email: string | null;
   name: string | null;
-  role: UserRole | null;
   token: null;
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -63,7 +59,6 @@ async function buildAppUser(fbUser: FirebaseUser): Promise<AppUser> {
       uid: fbUser.uid,
       name: fbUser.displayName ?? data?.name ?? "User",
       email: fbUser.email ?? "",
-      role: (data?.role as UserRole) ?? "user",
       emailVerified: fbUser.emailVerified,
     };
   } catch {
@@ -72,7 +67,6 @@ async function buildAppUser(fbUser: FirebaseUser): Promise<AppUser> {
       uid: fbUser.uid,
       name: fbUser.displayName ?? "User",
       email: fbUser.email ?? "",
-      role: "user",
       emailVerified: fbUser.emailVerified,
     };
   }
@@ -87,6 +81,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const fbUser = auth.currentUser;
     if (!fbUser) { setUser(null); return; }
     await fbUser.reload();
+    if (!fbUser.emailVerified) {
+      setUser(null);
+      return;
+    }
     const appUser = await buildAppUser(fbUser);
     setUser(appUser);
   }, []);
@@ -96,8 +94,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
       setFirebaseUser(fbUser);
       if (fbUser) {
-        const appUser = await buildAppUser(fbUser);
-        setUser(appUser);
+        if (!fbUser.emailVerified) {
+          setUser(null);
+        } else {
+          const appUser = await buildAppUser(fbUser);
+          setUser(appUser);
+        }
       } else {
         setUser(null);
       }
@@ -107,19 +109,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // ── Login ──────────────────────────────────────────────────────────────────
-  const login = async (identifier: string, password: string) => {
+  const login = async (email: string, password: string) => {
     try {
-      // identifier can be email or display name — Firebase Auth only supports email,
-      // so if it looks like a name we look up the email in Firestore first.
-      let email = identifier;
-      if (!identifier.includes("@")) {
-        // Look up by name in Firestore
-        const res = await fetch(`/api/auth/lookup-email?name=${encodeURIComponent(identifier)}`);
-        if (!res.ok) return { ok: false, error: "No account found with that username." };
-        const data = await res.json();
-        email = data.email;
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      if (!cred.user.emailVerified) {
+        await signOut(auth);
+        return { ok: false, error: "Please verify your email address before logging in." };
       }
-      await signInWithEmailAndPassword(auth, email, password);
       return { ok: true };
     } catch (err: unknown) {
       return { ok: false, error: friendlyError(err) };
@@ -223,7 +219,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         firebaseUser,
         email: user?.email ?? null,
         name: user?.name ?? null,
-        role: user?.role ?? null,
         token: null,
         isAuthenticated: !!user,
         isLoading,

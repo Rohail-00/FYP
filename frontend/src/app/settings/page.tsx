@@ -40,6 +40,7 @@ export default function SettingsPage() {
     const result = await updateDisplayName(editName.trim());
     setSaving(false);
     if (result.ok) {
+      localStorage.setItem("pak_name", editName.trim());
       setSuccessMsg("Display name updated successfully.");
       setTimeout(() => setSuccessMsg(""), 3000);
     } else {
