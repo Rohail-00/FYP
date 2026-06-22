@@ -16,6 +16,7 @@ export interface RepoSearchFile {
   id: string;
   name: string;
   type: string;
+  storagePath: string;
   downloadUrl: string;
 }
 
@@ -43,6 +44,7 @@ export interface AnalysisDecision {
 }
 
 export interface AnalysisComparison {
+  sourceClause?: SearchResult;
   candidate: SearchResult;
   decision: AnalysisDecision;
 }
@@ -78,6 +80,7 @@ export interface AnalysisResult {
   };
   preservedResults: {
     contradictions: AnalysisComparison[];
+    possibleConflicts?: AnalysisComparison[];
     consistentOrRelated: AnalysisComparison[];
     uncertain: AnalysisComparison[];
   };
@@ -85,6 +88,29 @@ export interface AnalysisResult {
     indexedFileCount: number | null;
     chunkCount: number;
     failures: Array<{ name: string; error: string }>;
+  };
+  multiFileAnalysis?: {
+    requestedFileCount: number;
+    indexedFileCount: number;
+    chunkCount: number;
+    pairCount: number;
+    truncatedFiles: string[];
+    failures: Array<{ name: string; error: string }>;
+  };
+  inputExtraction?: {
+    typedTextIncluded: boolean;
+    typedTextCharacters: number;
+    fileIncluded: boolean;
+    fileName: string | null;
+    fileType: string | null;
+    extractedCharacters: number;
+    combinedCharacters: number;
+    pageCount: number | null;
+    textPageCount: number | null;
+    ocrRequiredPages: number[];
+    ocrAppliedPages: number[];
+    ocrAvailable: boolean;
+    warnings: string[];
   };
 }
 
@@ -135,6 +161,76 @@ export async function analyzeRepositoryDraft(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ draft, files, scopeLabel, topK }),
+  });
+  return readJson<AnalysisResult>(response);
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error(`Could not read ${file.name}.`));
+        return;
+      }
+      resolve(result.includes(",") ? result.split(",", 2)[1] : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function analyzeCheckInput(options: {
+  text: string;
+  file: File | null;
+  topK?: number;
+  repository?: {
+    files: RepoSearchFile[];
+    scopeLabel: string;
+  };
+}): Promise<AnalysisResult> {
+  const encodedFile = options.file
+    ? {
+        name: options.file.name,
+        type: options.file.type || "application/octet-stream",
+        size: options.file.size,
+        contentBase64: await fileToBase64(options.file),
+      }
+    : null;
+  const repository = options.repository;
+  const endpoint = repository ? "/analyze-input-repo" : "/analyze-input";
+  const response = await fetch(`${AI_API_BASE}${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text: options.text,
+      file: encodedFile,
+      topK: options.topK ?? 5,
+      files: repository?.files,
+      scopeLabel: repository?.scopeLabel,
+    }),
+  });
+  return readJson<AnalysisResult>(response);
+}
+
+export async function analyzeMultipleFiles(
+  files: File[],
+  maxPairs = 30
+): Promise<AnalysisResult> {
+  const encodedFiles = await Promise.all(
+    files.map(async (file) => ({
+      name: file.name,
+      type: file.type || "application/octet-stream",
+      size: file.size,
+      contentBase64: await fileToBase64(file),
+    }))
+  );
+
+  const response = await fetch(`${AI_API_BASE}/analyze-multi`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ files: encodedFiles, maxPairs }),
   });
   return readJson<AnalysisResult>(response);
 }

@@ -9,6 +9,9 @@ from urllib.parse import parse_qs, urlparse
 from legal_ai import (
     LegalIndex,
     analyze_clause,
+    analyze_combined_input,
+    analyze_combined_input_against_repository,
+    analyze_multiple_documents,
     analyze_uploaded_repository,
     health_payload,
     search_uploaded_repository,
@@ -19,6 +22,7 @@ HOST = "127.0.0.1"
 PORT = 8001
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_MANIFEST_PATH = ROOT / "backend" / "model_manifest.json"
+MAX_REQUEST_BYTES = 110 * 1024 * 1024
 
 
 class AppState:
@@ -110,6 +114,103 @@ class PakLawHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        content_length = int(self.headers.get("Content-Length", "0") or "0")
+        if content_length > MAX_REQUEST_BYTES:
+            json_response(self, 413, {"error": "Request exceeds the 110 MB limit."})
+            return
+
+        if parsed.path == "/analyze-input-repo":
+            try:
+                body = read_json(self)
+                typed_text = str(body.get("text") or body.get("draft") or "")
+                file_info = body.get("file")
+                repository_files = body.get("files")
+                scope_label = str(body.get("scopeLabel") or "Selected Repository")
+                top_k = int(body.get("topK") or 5)
+                if file_info is not None and not isinstance(file_info, dict):
+                    json_response(self, 422, {"error": "file must be an object."})
+                    return
+                if not isinstance(repository_files, list) or not repository_files:
+                    json_response(self, 422, {"error": "repository files are required."})
+                    return
+
+                result, error, extraction = analyze_combined_input_against_repository(
+                    typed_text,
+                    file_info,
+                    repository_files,
+                    scope_label,
+                    top_k=top_k,
+                )
+                if error or result is None:
+                    json_response(
+                        self,
+                        422,
+                        {"error": error or "Input extraction failed.", "inputExtraction": extraction},
+                    )
+                    return
+                json_response(self, 200, result)
+            except Exception as exc:
+                json_response(self, 500, {"error": str(exc)})
+            return
+
+        if parsed.path == "/analyze-input":
+            try:
+                body = read_json(self)
+                typed_text = str(body.get("text") or body.get("draft") or "")
+                file_info = body.get("file")
+                top_k = int(body.get("topK") or 5)
+                if file_info is not None and not isinstance(file_info, dict):
+                    json_response(self, 422, {"error": "file must be an object."})
+                    return
+
+                result, error, extraction = analyze_combined_input(
+                    load_index(),
+                    typed_text,
+                    file_info,
+                    top_k=top_k,
+                )
+                if error or result is None:
+                    json_response(
+                        self,
+                        422,
+                        {"error": error or "Input extraction failed.", "inputExtraction": extraction},
+                    )
+                    return
+                json_response(self, 200, result)
+            except Exception as exc:
+                json_response(self, 500, {"error": str(exc)})
+            return
+
+        if parsed.path == "/analyze-multi":
+            try:
+                body = read_json(self)
+                files = body.get("files")
+                max_pairs = int(body.get("maxPairs") or 30)
+                if not isinstance(files, list) or not 2 <= len(files) <= 7:
+                    json_response(
+                        self,
+                        422,
+                        {"error": "Upload between 2 and 7 files."},
+                    )
+                    return
+
+                result = analyze_multiple_documents(files, max_pairs=max_pairs)
+                indexed_count = result["multiFileAnalysis"]["indexedFileCount"]
+                if indexed_count < 2:
+                    failures = result["multiFileAnalysis"]["failures"]
+                    detail = failures[0]["error"] if failures else "No searchable text found."
+                    json_response(
+                        self,
+                        422,
+                        {"error": f"At least two readable files are required. {detail}"},
+                    )
+                    return
+
+                json_response(self, 200, result)
+            except Exception as exc:
+                json_response(self, 500, {"error": str(exc)})
+            return
+
         if parsed.path == "/search-repo":
             try:
                 body = read_json(self)

@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import math
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import urllib.request
 import zipfile
 from io import BytesIO
@@ -30,9 +36,19 @@ PDF_DIR = ROOT / "PDF-Files"
 DATA_DIR = ROOT / "backend" / "data"
 INDEX_PATH = DATA_DIR / "law_index.joblib"
 BUILD_REPORT_PATH = DATA_DIR / "law_index_build_report.json"
+LOCAL_REPOSITORY_DIR = Path(
+    os.environ.get(
+        "PAKLAW_REPOSITORY_DIR",
+        str(ROOT / "frontend" / "local-data" / "repositories"),
+    )
+).resolve()
 
 MAX_CHARS_PER_CHUNK = 1600
 MIN_CHARS_PER_CHUNK = 250
+MAX_INLINE_FILE_BYTES = 10 * 1024 * 1024
+MAX_MULTI_FILE_CHUNKS_PER_FILE = 300
+MAX_OCR_PAGES = 50
+MIN_EMBEDDED_TEXT_CHARS = 20
 
 
 @dataclass
@@ -160,25 +176,12 @@ def extract_docx_text(data: bytes) -> str:
     return "\n\n".join(paragraphs)
 
 
-def extract_uploaded_file_chunks(file_info: dict[str, Any]) -> tuple[list[LawChunk], str | None]:
-    name = str(file_info.get("name") or "Repository document")
-    download_url = str(file_info.get("downloadUrl") or "")
-    file_type = str(file_info.get("type") or "")
-    file_label = str(file_info.get("file") or name)
-
-    if not download_url:
-        return [], "Missing downloadUrl"
-
-    try:
-        request = urllib.request.Request(
-            download_url,
-            headers={"User-Agent": "PakLawAI repository search"},
-        )
-        with urllib.request.urlopen(request, timeout=45) as response:
-            data = response.read()
-    except Exception as exc:
-        return [], f"Could not download file: {exc}"
-
+def extract_document_bytes_chunks(
+    data: bytes,
+    name: str,
+    file_type: str,
+    file_label: str,
+) -> tuple[list[LawChunk], str | None]:
     lower_name = name.lower()
     if "pdf" in file_type or lower_name.endswith(".pdf"):
         return extract_pdf_bytes_chunks(data, Path(name).stem, file_label)
@@ -186,12 +189,12 @@ def extract_uploaded_file_chunks(file_info: dict[str, Any]) -> tuple[list[LawChu
     try:
         if lower_name.endswith(".docx") or "wordprocessingml" in file_type:
             text = extract_docx_text(data)
-        else:
+        elif lower_name.endswith(".txt") or file_type.startswith("text/"):
             text = data.decode("utf-8", errors="replace")
+        else:
+            return [], "Unsupported file type. Use PDF, DOCX, or TXT."
     except Exception as exc:
         return [], f"Could not extract text: {exc}"
-
-    text_chunks = chunks_with_short_text_fallback(text)
 
     chunks = [
         LawChunk(
@@ -202,9 +205,248 @@ def extract_uploaded_file_chunks(file_info: dict[str, Any]) -> tuple[list[LawChu
             page_end=1,
             text=chunk,
         )
-        for idx, chunk in enumerate(text_chunks)
+        for idx, chunk in enumerate(chunks_with_short_text_fallback(text))
     ]
+    if not chunks:
+        return [], "No searchable text was found in the document."
     return chunks, None
+
+
+def extract_uploaded_file_chunks(file_info: dict[str, Any]) -> tuple[list[LawChunk], str | None]:
+    name = str(file_info.get("name") or "Repository document")
+    download_url = str(file_info.get("downloadUrl") or "")
+    storage_path = str(file_info.get("storagePath") or "")
+    file_type = str(file_info.get("type") or "")
+    file_label = str(file_info.get("file") or name)
+
+    if storage_path:
+        try:
+            local_file = (LOCAL_REPOSITORY_DIR / Path(storage_path)).resolve()
+            local_file.relative_to(LOCAL_REPOSITORY_DIR)
+            data = local_file.read_bytes()
+        except (OSError, ValueError) as exc:
+            return [], f"Could not read local repository file: {exc}"
+    elif download_url:
+        try:
+            request = urllib.request.Request(
+                download_url,
+                headers={"User-Agent": "PakLawAI repository search"},
+            )
+            with urllib.request.urlopen(request, timeout=45) as response:
+                data = response.read()
+        except Exception as exc:
+            return [], f"Could not download file: {exc}"
+    else:
+        return [], "Missing storagePath or downloadUrl"
+
+    return extract_document_bytes_chunks(data, name, file_type, file_label)
+
+
+def extract_inline_file_chunks(
+    file_info: dict[str, Any],
+) -> tuple[list[LawChunk], str | None]:
+    name = str(file_info.get("name") or "Uploaded document")
+    file_type = str(file_info.get("type") or "")
+    encoded = str(file_info.get("contentBase64") or "")
+    if not encoded:
+        return [], "Missing file content."
+
+    if "," in encoded and encoded.lstrip().lower().startswith("data:"):
+        encoded = encoded.split(",", 1)[1]
+
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        return [], "The uploaded file content is not valid base64 data."
+
+    if not data:
+        return [], "The uploaded file is empty."
+    if len(data) > MAX_INLINE_FILE_BYTES:
+        return [], "The uploaded file exceeds the 10 MB limit."
+
+    return extract_document_bytes_chunks(data, name, file_type, name)
+
+
+def local_ocr_commands() -> tuple[str | None, str | None]:
+    tesseract = os.environ.get("TESSERACT_CMD") or shutil.which("tesseract")
+    pdftoppm = os.environ.get("PDFTOPPM_CMD") or shutil.which("pdftoppm")
+    return tesseract, pdftoppm
+
+
+def ocr_pdf_pages(
+    data: bytes,
+    page_numbers: list[int],
+) -> tuple[dict[int, str], list[str]]:
+    tesseract, pdftoppm = local_ocr_commands()
+    if not tesseract or not pdftoppm:
+        return {}, [
+            "Local OCR is unavailable. Install Tesseract OCR and Poppler, or set "
+            "TESSERACT_CMD and PDFTOPPM_CMD."
+        ]
+
+    language = os.environ.get("PAKLAW_OCR_LANGUAGE", "eng")
+    selected_pages = page_numbers[:MAX_OCR_PAGES]
+    warnings: list[str] = []
+    if len(page_numbers) > MAX_OCR_PAGES:
+        warnings.append(
+            f"OCR was limited to the first {MAX_OCR_PAGES} image-only pages."
+        )
+
+    extracted: dict[int, str] = {}
+    with tempfile.TemporaryDirectory(prefix="paklaw-ocr-") as temp_dir:
+        temp = Path(temp_dir)
+        pdf_path = temp / "input.pdf"
+        pdf_path.write_bytes(data)
+
+        for page_number in selected_pages:
+            output_prefix = temp / f"page-{page_number}"
+            try:
+                subprocess.run(
+                    [
+                        pdftoppm,
+                        "-f",
+                        str(page_number),
+                        "-l",
+                        str(page_number),
+                        "-r",
+                        "200",
+                        "-singlefile",
+                        "-png",
+                        str(pdf_path),
+                        str(output_prefix),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    timeout=120,
+                )
+                image_path = output_prefix.with_suffix(".png")
+                completed = subprocess.run(
+                    [
+                        tesseract,
+                        str(image_path),
+                        "stdout",
+                        "-l",
+                        language,
+                        "--psm",
+                        "6",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    timeout=120,
+                )
+                text = completed.stdout.decode("utf-8", errors="replace").strip()
+                if text:
+                    extracted[page_number] = text
+            except (OSError, subprocess.SubprocessError) as exc:
+                warnings.append(f"OCR failed on page {page_number}: {exc}")
+
+    return extracted, warnings
+
+
+def extract_pdf_input_chunks(
+    data: bytes,
+    name: str,
+) -> tuple[list[LawChunk], str | None, dict[str, Any]]:
+    chunks: list[LawChunk] = []
+    metadata: dict[str, Any] = {
+        "pageCount": 0,
+        "textPageCount": 0,
+        "ocrRequiredPages": [],
+        "ocrAppliedPages": [],
+        "ocrAvailable": all(local_ocr_commands()),
+        "warnings": [],
+    }
+
+    try:
+        reader = PdfReader(BytesIO(data))
+        metadata["pageCount"] = len(reader.pages)
+        embedded_text: dict[int, str] = {}
+        image_only_pages: list[int] = []
+
+        for page_index, page in enumerate(reader.pages):
+            page_number = page_index + 1
+            text = clean_text(page.extract_text() or "")
+            if len(text) >= MIN_EMBEDDED_TEXT_CHARS:
+                embedded_text[page_number] = text
+            else:
+                image_only_pages.append(page_number)
+
+        metadata["textPageCount"] = len(embedded_text)
+        metadata["ocrRequiredPages"] = image_only_pages
+        ocr_text: dict[int, str] = {}
+        if image_only_pages:
+            ocr_text, warnings = ocr_pdf_pages(data, image_only_pages)
+            metadata["ocrAppliedPages"] = sorted(ocr_text)
+            metadata["warnings"].extend(warnings)
+
+        title = Path(name).stem
+        for page_number in range(1, metadata["pageCount"] + 1):
+            text = embedded_text.get(page_number) or ocr_text.get(page_number, "")
+            for chunk_index, chunk in enumerate(chunks_with_short_text_fallback(text)):
+                chunks.append(
+                    LawChunk(
+                        id=f"{title}:{page_number}:{chunk_index + 1}",
+                        title=title,
+                        file=name,
+                        page_start=page_number,
+                        page_end=page_number,
+                        text=chunk,
+                    )
+                )
+    except Exception as exc:
+        return [], f"Could not extract PDF text: {exc}", metadata
+
+    if not chunks and metadata["ocrRequiredPages"]:
+        return (
+            [],
+            "This PDF appears to contain scanned images rather than searchable text. "
+            "Local OCR is required before it can be analyzed.",
+            metadata,
+        )
+    if not chunks:
+        return [], "No searchable text was found in the PDF.", metadata
+
+    skipped = set(metadata["ocrRequiredPages"]) - set(metadata["ocrAppliedPages"])
+    if skipped:
+        metadata["warnings"].append(
+            f"{len(skipped)} image-only page(s) could not be included without local OCR."
+        )
+    return chunks, None, metadata
+
+
+def extract_inline_input_file(
+    file_info: dict[str, Any],
+) -> tuple[list[LawChunk], str | None, dict[str, Any]]:
+    name = str(file_info.get("name") or "Uploaded document")
+    file_type = str(file_info.get("type") or "")
+    encoded = str(file_info.get("contentBase64") or "")
+    metadata: dict[str, Any] = {
+        "pageCount": None,
+        "textPageCount": None,
+        "ocrRequiredPages": [],
+        "ocrAppliedPages": [],
+        "ocrAvailable": all(local_ocr_commands()),
+        "warnings": [],
+    }
+    if not encoded:
+        return [], "Missing file content.", metadata
+    if "," in encoded and encoded.lstrip().lower().startswith("data:"):
+        encoded = encoded.split(",", 1)[1]
+
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        return [], "The uploaded file content is not valid base64 data.", metadata
+    if not data:
+        return [], "The uploaded file is empty.", metadata
+    if len(data) > MAX_INLINE_FILE_BYTES:
+        return [], "The uploaded file exceeds the 10 MB limit.", metadata
+
+    if "pdf" in file_type or name.lower().endswith(".pdf"):
+        return extract_pdf_input_chunks(data, name)
+
+    chunks, error = extract_document_bytes_chunks(data, name, file_type, name)
+    return chunks, error, metadata
 
 
 def build_index(limit: int | None = None) -> dict[str, Any]:
@@ -674,6 +916,289 @@ def compare_clause(draft: str, active: str, retrieval_score: float) -> dict[str,
         "draftFeatures": draft_features,
         "activeFeatures": active_features,
     }
+
+
+def analyze_multiple_documents(
+    files: list[dict[str, Any]],
+    max_pairs: int = 30,
+) -> dict[str, Any]:
+    all_chunks: list[LawChunk] = []
+    source_file_indexes: list[int] = []
+    failures: list[dict[str, str]] = []
+    truncated_files: list[str] = []
+    indexed_files = 0
+
+    for file_index, file_info in enumerate(files):
+        chunks, error = extract_inline_file_chunks(file_info)
+        name = str(file_info.get("name") or f"Document {file_index + 1}")
+        if error:
+            failures.append({"name": name, "error": error})
+            continue
+
+        indexed_files += 1
+        if len(chunks) > MAX_MULTI_FILE_CHUNKS_PER_FILE:
+            chunks = chunks[:MAX_MULTI_FILE_CHUNKS_PER_FILE]
+            truncated_files.append(name)
+
+        for chunk in chunks:
+            chunk.id = f"multi:{file_index}:{chunk.id}"
+            all_chunks.append(chunk)
+            source_file_indexes.append(file_index)
+
+    comparisons: list[dict[str, Any]] = []
+    max_pairs = max(1, min(max_pairs, 50))
+
+    if indexed_files >= 2 and len(all_chunks) >= 2:
+        texts = [f"{chunk.title}\n{chunk.text}" for chunk in all_chunks]
+        vectorizer = TfidfVectorizer(
+            lowercase=True,
+            stop_words="english",
+            ngram_range=(1, 2),
+            min_df=1,
+            max_df=1.0,
+            max_features=40_000,
+            sublinear_tf=True,
+        )
+        try:
+            matrix = vectorizer.fit_transform(texts)
+            similarities = cosine_similarity(
+                matrix,
+                dense_output=False,
+            ).tocsr()
+        except ValueError:
+            similarities = None
+
+        ranked_pairs: list[tuple[float, int, int]] = []
+        if similarities is not None:
+            for left_index in range(similarities.shape[0]):
+                row_start = similarities.indptr[left_index]
+                row_end = similarities.indptr[left_index + 1]
+                for right_index, raw_score in zip(
+                    similarities.indices[row_start:row_end],
+                    similarities.data[row_start:row_end],
+                ):
+                    right_index = int(right_index)
+                    score = float(raw_score)
+                    if right_index <= left_index or score < 0.05:
+                        continue
+                    if source_file_indexes[left_index] == source_file_indexes[right_index]:
+                        continue
+                    ranked_pairs.append((score, left_index, right_index))
+
+        ranked_pairs.sort(key=lambda item: item[0], reverse=True)
+        file_pair_counts: dict[tuple[int, int], int] = {}
+
+        for score, left_index, right_index in ranked_pairs:
+            file_pair = tuple(
+                sorted(
+                    (
+                        source_file_indexes[left_index],
+                        source_file_indexes[right_index],
+                    )
+                )
+            )
+            if file_pair_counts.get(file_pair, 0) >= 10:
+                continue
+
+            left = all_chunks[left_index]
+            right = all_chunks[right_index]
+            decision = compare_clause(left.text, right.text, score)
+            comparisons.append(
+                {
+                    "sourceClause": {
+                        "id": left.id,
+                        "title": left.title,
+                        "file": left.file,
+                        "pageStart": left.page_start,
+                        "pageEnd": left.page_end,
+                        "text": left.text,
+                        "score": round(score, 4),
+                    },
+                    "candidate": {
+                        "id": f"pair:{left.id}:{right.id}",
+                        "title": right.title,
+                        "file": right.file,
+                        "pageStart": right.page_start,
+                        "pageEnd": right.page_end,
+                        "text": right.text,
+                        "score": round(score, 4),
+                    },
+                    "decision": decision,
+                }
+            )
+            file_pair_counts[file_pair] = file_pair_counts.get(file_pair, 0) + 1
+            if len(comparisons) >= max_pairs:
+                break
+
+    contradiction_count = sum(
+        item["decision"]["resultType"] == "contradiction"
+        for item in comparisons
+    )
+    possible_count = sum(
+        item["decision"]["resultType"] == "possible_conflict"
+        for item in comparisons
+    )
+    if contradiction_count:
+        result_type = "contradiction"
+    elif possible_count:
+        result_type = "possible_conflict"
+    elif comparisons:
+        result_type = "consistent_or_related"
+    else:
+        result_type = "uncertain"
+
+    routed_experts: list[str] = ["Semantic Retrieval Expert"]
+    for comparison in comparisons:
+        for key in ("draftFeatures", "activeFeatures"):
+            for expert in comparison["decision"][key]["routedExperts"]:
+                if expert not in routed_experts:
+                    routed_experts.append(expert)
+
+    combined_text = "\n".join(chunk.text for chunk in all_chunks[:20])
+    combined_features = extract_features(combined_text)
+    for expert in combined_features["routedExperts"]:
+        if expert not in routed_experts:
+            routed_experts.append(expert)
+
+    best_confidence = max(
+        (item["decision"]["confidence"] for item in comparisons),
+        default=0.0,
+    )
+    result = {
+        "summary": {
+            "resultType": result_type,
+            "confidence": round(best_confidence, 3),
+            "candidateCount": len(comparisons),
+            "contradictionCount": contradiction_count,
+            "possibleConflictCount": possible_count,
+            "routedExperts": routed_experts,
+            "evaluationMatrix": "cross-file TF-IDF retrieval + numeric/date/negation exact checks",
+            "knowledgeBase": f"{indexed_files} Uploaded Documents",
+            "retrievalSource": "multi_file_pairwise",
+        },
+        "draft": f"Cross-file comparison of {indexed_files} uploaded documents",
+        "comparisons": comparisons,
+        "part2Pipeline": build_part2_trace(combined_features, comparisons),
+        "preservedResults": {
+            "contradictions": [
+                item
+                for item in comparisons
+                if item["decision"]["resultType"] == "contradiction"
+            ],
+            "possibleConflicts": [
+                item
+                for item in comparisons
+                if item["decision"]["resultType"] == "possible_conflict"
+            ],
+            "consistentOrRelated": [
+                item
+                for item in comparisons
+                if item["decision"]["resultType"] == "consistent_or_related"
+            ],
+            "uncertain": [
+                item
+                for item in comparisons
+                if item["decision"]["resultType"] == "uncertain"
+            ],
+        },
+        "repositorySearch": {
+            "indexedFileCount": indexed_files,
+            "chunkCount": len(all_chunks),
+            "failures": failures,
+        },
+        "multiFileAnalysis": {
+            "requestedFileCount": len(files),
+            "indexedFileCount": indexed_files,
+            "chunkCount": len(all_chunks),
+            "pairCount": len(comparisons),
+            "truncatedFiles": truncated_files,
+            "failures": failures,
+        },
+    }
+    return result
+
+
+def prepare_combined_input(
+    typed_text: str,
+    file_info: dict[str, Any] | None,
+) -> tuple[str | None, str | None, dict[str, Any]]:
+    typed_text = clean_text(typed_text)
+    sections: list[str] = []
+    if typed_text:
+        sections.append(f"[USER TYPED TEXT]\n{typed_text}")
+
+    extraction: dict[str, Any] = {
+        "typedTextIncluded": bool(typed_text),
+        "typedTextCharacters": len(typed_text),
+        "fileIncluded": bool(file_info),
+        "fileName": None,
+        "fileType": None,
+        "extractedCharacters": 0,
+        "combinedCharacters": 0,
+        "pageCount": None,
+        "textPageCount": None,
+        "ocrRequiredPages": [],
+        "ocrAppliedPages": [],
+        "ocrAvailable": all(local_ocr_commands()),
+        "warnings": [],
+    }
+
+    if file_info:
+        name = str(file_info.get("name") or "Uploaded document")
+        file_type = str(file_info.get("type") or "")
+        chunks, error, file_metadata = extract_inline_input_file(file_info)
+        extraction.update(file_metadata)
+        extraction["fileName"] = name
+        extraction["fileType"] = file_type
+        if error:
+            return None, error, extraction
+
+        extracted_text = "\n\n".join(chunk.text for chunk in chunks)
+        extraction["extractedCharacters"] = len(extracted_text)
+        sections.append(f"[UPLOADED DOCUMENT: {name}]\n{extracted_text}")
+
+    if not sections:
+        return None, "Type text, upload a document, or provide both.", extraction
+
+    combined_text = "\n\n".join(sections)
+    extraction["combinedCharacters"] = len(combined_text)
+    return combined_text, None, extraction
+
+
+def analyze_combined_input(
+    index: LegalIndex,
+    typed_text: str,
+    file_info: dict[str, Any] | None,
+    top_k: int = 5,
+) -> tuple[dict[str, Any] | None, str | None, dict[str, Any]]:
+    combined_text, error, extraction = prepare_combined_input(typed_text, file_info)
+    if error or combined_text is None:
+        return None, error, extraction
+
+    result = analyze_clause(index, combined_text, top_k=top_k)
+    result["inputExtraction"] = extraction
+    return result, None, extraction
+
+
+def analyze_combined_input_against_repository(
+    typed_text: str,
+    file_info: dict[str, Any] | None,
+    repository_files: list[dict[str, Any]],
+    scope_label: str,
+    top_k: int = 5,
+) -> tuple[dict[str, Any] | None, str | None, dict[str, Any]]:
+    combined_text, error, extraction = prepare_combined_input(typed_text, file_info)
+    if error or combined_text is None:
+        return None, error, extraction
+
+    result = analyze_uploaded_repository(
+        combined_text,
+        repository_files,
+        top_k=top_k,
+        scope_label=scope_label,
+    )
+    result["inputExtraction"] = extraction
+    return result, None, extraction
 
 
 def analyze_clause(index: LegalIndex, draft: str, top_k: int = 5) -> dict[str, Any]:

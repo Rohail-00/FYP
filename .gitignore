@@ -5,3 +5,4 @@ __pycache__/
 frontend/.next/
 backend/models/
 backend/data/*.tmp
+frontend/local-data/

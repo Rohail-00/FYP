@@ -72,6 +72,7 @@ export default function SearchPage() {
               id: file.id,
               name: file.name,
               type: file.type,
+              storagePath: file.storagePath,
               downloadUrl: file.downloadUrl,
             })),
             12

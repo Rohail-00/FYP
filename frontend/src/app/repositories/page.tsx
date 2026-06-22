@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useRepo } from "@/context/RepoContext";
 import type { Repository } from "@/context/RepoContext";
+import { openRepoFile } from "@/lib/repoService";
 import {
   FolderOpen,
   Plus,
@@ -99,6 +100,7 @@ export default function RepositoriesPage() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [removingFileId, setRemovingFileId] = useState<string | null>(null);
+  const [openingFileId, setOpeningFileId] = useState<string | null>(null);
 
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
 
@@ -174,6 +176,17 @@ export default function RepositoriesPage() {
       showToast("Failed to remove file.", false);
     } finally {
       setRemovingFileId(null);
+    }
+  };
+
+  const handleOpenFile = async (repoId: string, fileId: string, fileName: string) => {
+    setOpeningFileId(fileId);
+    try {
+      await openRepoFile(repoId, fileId, fileName);
+    } catch {
+      showToast("Failed to open file.", false);
+    } finally {
+      setOpeningFileId(null);
     }
   };
 
@@ -497,7 +510,7 @@ export default function RepositoriesPage() {
                     </button>
                     <input
                       type="file"
-                      accept=".pdf,.doc,.docx,.txt"
+                      accept=".pdf,.docx,.txt"
                       multiple
                       style={{ display: "none" }}
                       ref={(el) => { fileInputRefs.current[repo.id] = el; }}
@@ -678,14 +691,17 @@ export default function RepositoriesPage() {
                               </p>
                             </div>
 
-                            {/* Download link */}
+                            {/* Authenticated local-file download */}
                             {file.downloadUrl && (
-                              <a
-                                href={file.downloadUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => handleOpenFile(repo.id, file.id, file.name)}
+                                disabled={openingFileId === file.id}
                                 title="Open file"
                                 style={{
+                                  background: "none",
+                                  border: "none",
+                                  cursor: openingFileId === file.id ? "wait" : "pointer",
                                   color: "var(--text-muted)",
                                   display: "flex",
                                   alignItems: "center",
@@ -697,8 +713,11 @@ export default function RepositoriesPage() {
                                 onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent)")}
                                 onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
                               >
-                                <ExternalLink size={14} />
-                              </a>
+                                {openingFileId === file.id
+                                  ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                                  : <ExternalLink size={14} />
+                                }
+                              </button>
                             )}
 
                             {/* Remove file */}

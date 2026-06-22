@@ -4,13 +4,12 @@ import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useRepo } from "@/context/RepoContext";
-import { analyzeDraft, analyzeRepositoryDraft } from "@/lib/aiClient";
+import { analyzeCheckInput } from "@/lib/aiClient";
 import { Database, AlertCircle } from "lucide-react";
 
-const ACCEPTED = [".pdf", ".doc", ".docx", ".txt"];
+const ACCEPTED = [".pdf", ".docx", ".txt"];
 const ACCEPTED_MIME = [
   "application/pdf",
-  "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain",
 ];
@@ -91,16 +90,6 @@ export default function CheckPage() {
 
     setFileName(file.name);
     setSelectedFile(file);
-
-    if (file.type === "text/plain" || file.name.toLowerCase().endsWith(".txt")) {
-      file.text()
-        .then((text) => {
-          if (!draftText.trim()) setDraftText(text.trim());
-        })
-        .catch(() => {
-          setError("TXT file was selected, but its text could not be read.");
-        });
-    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -157,13 +146,12 @@ export default function CheckPage() {
       return;
     }
 
-    if (!draftText.trim()) {
-      setError("PDF/DOCX direct extraction is not active on this page yet. Upload those files to a repository, or paste clause text here.");
-      return;
-    }
-
     setIsSubmitting(true);
-    setSubmitBtnText("Running retrieval + model routing...");
+    setSubmitBtnText(
+      selectedFile
+        ? "Extracting document and running analysis..."
+        : "Running retrieval and model routing..."
+    );
 
     try {
       const activeRepo = repos.find((repo) => repo.id === selectedRepo);
@@ -174,24 +162,32 @@ export default function CheckPage() {
         return;
       }
 
-      const result = activeRepo
-        ? await analyzeRepositoryDraft(
-            draftText.trim(),
-            activeRepo.files.map((file) => ({
-              id: file.id,
-              name: file.name,
-              type: file.type,
-              downloadUrl: file.downloadUrl,
-            })),
-            activeRepo.name,
-            5
-          )
-        : await analyzeDraft(draftText.trim(), 5);
+      sessionStorage.removeItem("paklaw_latest_analysis");
+      const result = await analyzeCheckInput({
+        text: draftText.trim(),
+        file: selectedFile,
+        topK: 5,
+        repository: activeRepo
+          ? {
+              scopeLabel: activeRepo.name,
+              files: activeRepo.files.map((file) => ({
+                id: file.id,
+                name: file.name,
+                type: file.type,
+                storagePath: file.storagePath,
+                downloadUrl: file.downloadUrl,
+              })),
+            }
+          : undefined,
+      });
       sessionStorage.setItem("paklaw_latest_analysis", JSON.stringify(result));
       router.push("/report");
     } catch (err) {
       const message = err instanceof Error ? err.message : "AI backend is not reachable.";
-      setError(`${message} Make sure backend/server.py is running on port 8001.`);
+      const backendHint = /fetch|network|reachable|connection/i.test(message)
+        ? " Make sure backend/server.py is running on port 8001."
+        : "";
+      setError(`${message}${backendHint}`);
       setIsSubmitting(false);
       setSubmitBtnText("Analyze for Inconsistencies");
     }
@@ -277,7 +273,7 @@ export default function CheckPage() {
           <div className="form-group">
             <div className="flex justify-between items-center mb-2" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
               <label htmlFor="draftText" className="form-label" style={{ fontWeight: 600, marginBottom: 0 }}>
-                Draft Clause Text
+                Draft Clause Text (optional with a file)
               </label>
               <button
                 type="button"
@@ -330,7 +326,7 @@ export default function CheckPage() {
 
           <div className="form-group">
             <label className="form-label" style={{ fontWeight: 600 }}>
-              Or Upload Document File
+              Upload Document File (optional with text)
             </label>
             <div
               className={`upload-dropzone ${dragOver ? "upload-dropzone-active" : ""}`}
@@ -348,7 +344,7 @@ export default function CheckPage() {
             >
               <div className="upload-icon">📂</div>
               <div style={{ fontSize: "0.85rem", fontWeight: 500, color: "var(--text-primary)" }}>
-                Click to select files or drag & drop here
+                Click to select a file or drag & drop here
               </div>
               <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
                 PDF, DOCX, or TXT up to 10MB
@@ -356,7 +352,7 @@ export default function CheckPage() {
               <input
                 type="file"
                 ref={fileInputRef}
-                accept=".pdf,.doc,.docx,.txt"
+                accept=".pdf,.docx,.txt"
                 style={{ display: "none" }}
                 onChange={handleFileChange}
               />
@@ -371,6 +367,7 @@ export default function CheckPage() {
                 }}
               >
                 Selected file: <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{fileName}</span>
+                {draftText.trim() ? " - its extracted text will be combined with the typed text." : " - its extracted text will be analyzed."}
               </div>
             )}
           </div>

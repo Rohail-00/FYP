@@ -1,112 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAuthenticatedUid } from "@/lib/firebaseServerAuth";
 import {
-  decodeFields,
-  deleteStorageObject,
-  docPath,
-  encodeFields,
-  firestoreFetch,
-  getFirebaseToken,
-  getUidFromToken,
-  type FirestoreDocument,
-} from "@/lib/firebaseRest";
+  deleteRepository,
+  LocalRepoError,
+  updateRepository,
+} from "@/lib/localRepoStore";
+
+export const runtime = "nodejs";
 
 type RouteContext = {
   params: Promise<{ repoId: string }>;
 };
 
-function unauthorized() {
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-}
-
-async function listFileDocs(token: string, uid: string, repoId: string) {
-  const response = await firestoreFetch<{ documents?: FirestoreDocument[] }>(
-    token,
-    `users/${uid}/repositories/${repoId}/files`
-  );
-  return response.documents ?? [];
+function errorResponse(error: unknown, fallback: string) {
+  if (error instanceof LocalRepoError) {
+    return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+  console.error(fallback, error);
+  return NextResponse.json({ error: fallback }, { status: 500 });
 }
 
 export async function DELETE(req: NextRequest, { params }: RouteContext) {
-  const token = getFirebaseToken(req);
-  const uid = token ? getUidFromToken(token) : null;
-  if (!token || !uid) return unauthorized();
-
-  const { repoId } = await params;
+  const uid = await getAuthenticatedUid(req);
+  if (!uid) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   try {
-    const fileDocs = await listFileDocs(token, uid, repoId);
-
-    await Promise.all(
-      fileDocs.map(async (fileDoc) => {
-        const fields = decodeFields(fileDoc);
-        const storagePath = fields.storagePath;
-
-        if (typeof storagePath === "string" && storagePath) {
-          await deleteStorageObject(token, storagePath);
-        }
-
-        await firestoreFetch<void>(token, docPath(fileDoc), {
-          method: "DELETE",
-        });
-      })
-    );
-
-    await firestoreFetch<void>(
-      token,
-      `users/${uid}/repositories/${repoId}`,
-      { method: "DELETE" }
-    );
-
+    const { repoId } = await params;
+    await deleteRepository(uid, repoId);
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error("[DELETE /api/repos/:id]", err);
-    return NextResponse.json(
-      { error: "Failed to delete repository." },
-      { status: 500 }
-    );
+  } catch (error) {
+    return errorResponse(error, "Failed to delete repository.");
   }
 }
 
 export async function PATCH(req: NextRequest, { params }: RouteContext) {
-  const token = getFirebaseToken(req);
-  const uid = token ? getUidFromToken(token) : null;
-  if (!token || !uid) return unauthorized();
-
-  const { repoId } = await params;
+  const uid = await getAuthenticatedUid(req);
+  if (!uid) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   let body: { name?: string; description?: string };
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (body.name?.trim()) updates.name = body.name.trim();
-  if (typeof body.description === "string") {
-    updates.description = body.description.trim();
+  const name = body.name?.trim();
+  const description =
+    typeof body.description === "string" ? body.description.trim() : undefined;
+  if (!name && description === undefined) {
+    return NextResponse.json({ error: "No updates supplied." }, { status: 422 });
   }
-
-  const updateMask = Object.keys(updates)
-    .map((field) => `updateMask.fieldPaths=${encodeURIComponent(field)}`)
-    .join("&");
 
   try {
-    await firestoreFetch<void>(
-      token,
-      `users/${uid}/repositories/${repoId}?${updateMask}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(encodeFields(updates)),
-      }
-    );
-
-    return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error("[PATCH /api/repos/:id]", err);
-    return NextResponse.json(
-      { error: "Failed to update repository." },
-      { status: 500 }
-    );
+    const { repoId } = await params;
+    const repo = await updateRepository(uid, repoId, { name, description });
+    return NextResponse.json({ repo });
+  } catch (error) {
+    return errorResponse(error, "Failed to update repository.");
   }
 }

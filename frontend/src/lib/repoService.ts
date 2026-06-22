@@ -1,50 +1,4 @@
-/**
- * repoService.ts
- * ──────────────
- * All Firestore + Firebase-Storage operations for the Repository feature.
- *
- * Firestore schema
- * ────────────────
- * users/{uid}/repositories/{repoId}   ← repo metadata doc
- *   name        : string
- *   description : string
- *   createdAt   : Timestamp
- *   updatedAt   : Timestamp
- *
- * users/{uid}/repositories/{repoId}/files/{fileId}  ← file metadata sub-doc
- *   name        : string
- *   size        : number
- *   type        : string
- *   storagePath : string          ← Firebase Storage path
- *   downloadUrl : string          ← public download URL
- *   uploadedAt  : Timestamp
- *
- * Storage path
- * ────────────
- * repos/{uid}/{repoId}/{fileId}/{filename}
- */
-
-import {
-  collection,
-  doc,
-  addDoc,
-  setDoc,
-  deleteDoc,
-  getDocs,
-  serverTimestamp,
-  query,
-  orderBy,
-  Timestamp,
-} from "firebase/firestore";
-import {
-  ref,
-  uploadBytesResumable,
-  getDownloadURL,
-  deleteObject,
-} from "firebase/storage";
-import { db, storage } from "@/lib/firebase";
-
-// ── Public types ─────────────────────────────────────────────────────────────
+import { auth } from "@/lib/firebase";
 
 export interface RepoFile {
   id: string;
@@ -53,224 +7,165 @@ export interface RepoFile {
   type: string;
   storagePath: string;
   downloadUrl: string;
-  uploadedAt: string; // ISO string
+  uploadedAt: string;
 }
 
 export interface Repository {
   id: string;
   name: string;
   description: string;
-  createdAt: string; // ISO string
-  updatedAt: string; // ISO string
+  createdAt: string;
+  updatedAt: string;
   files: RepoFile[];
 }
 
-export type UploadProgressCallback = (fileId: string, progress: number) => void;
+export type UploadProgressCallback = (
+  fileId: string,
+  progress: number
+) => void;
 
-// ── Internal helpers ─────────────────────────────────────────────────────────
-
-function reposCol(uid: string) {
-  return collection(db, "users", uid, "repositories");
+async function idToken(): Promise<string> {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Not authenticated");
+  return user.getIdToken();
 }
 
-function repoDoc(uid: string, repoId: string) {
-  return doc(db, "users", uid, "repositories", repoId);
-}
+async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const token = await idToken();
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(init.headers ?? {}),
+    },
+  });
 
-function filesCol(uid: string, repoId: string) {
-  return collection(db, "users", uid, "repositories", repoId, "files");
-}
-
-function fileDoc(uid: string, repoId: string, fileId: string) {
-  return doc(db, "users", uid, "repositories", repoId, "files", fileId);
-}
-
-function toISO(ts: unknown): string {
-  if (ts instanceof Timestamp) return ts.toDate().toISOString();
-  if (typeof ts === "string") return ts;
-  return new Date().toISOString();
-}
-
-// ── Repository CRUD ──────────────────────────────────────────────────────────
-
-/** Fetch all repositories (with their files) for a user */
-export async function fetchRepos(uid: string): Promise<Repository[]> {
-  const reposSnap = await getDocs(
-    query(reposCol(uid), orderBy("createdAt", "desc"))
-  );
-
-  const repos: Repository[] = [];
-
-  for (const repoSnap of reposSnap.docs) {
-    const data = repoSnap.data();
-
-    const filesSnap = await getDocs(
-      query(filesCol(uid, repoSnap.id), orderBy("uploadedAt", "asc"))
-    );
-
-    const files: RepoFile[] = filesSnap.docs.map((f) => {
-      const fd = f.data();
-      return {
-        id: f.id,
-        name: fd.name,
-        size: fd.size,
-        type: fd.type,
-        storagePath: fd.storagePath,
-        downloadUrl: fd.downloadUrl,
-        uploadedAt: toISO(fd.uploadedAt),
-      };
-    });
-
-    repos.push({
-      id: repoSnap.id,
-      name: data.name,
-      description: data.description ?? "",
-      createdAt: toISO(data.createdAt),
-      updatedAt: toISO(data.updatedAt),
-      files,
-    });
+  const data = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new Error(data.error ?? `Repository request failed (${response.status}).`);
   }
-
-  return repos;
+  return data;
 }
 
-/** Create a new empty repository */
+export async function fetchRepos(uid: string): Promise<Repository[]> {
+  void uid;
+  const data = await apiFetch<{ repos: Repository[] }>("/api/repos", {
+    cache: "no-store",
+  });
+  return data.repos;
+}
+
 export async function createRepo(
-  uid: string,
+  _uid: string,
   name: string,
   description: string
 ): Promise<Repository> {
-  const now = serverTimestamp();
-  const docRef = await addDoc(reposCol(uid), {
-    name: name.trim(),
-    description: description.trim(),
-    createdAt: now,
-    updatedAt: now,
+  const data = await apiFetch<{ repo: Repository }>("/api/repos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, description }),
   });
-
-  const isoNow = new Date().toISOString();
-  return {
-    id: docRef.id,
-    name: name.trim(),
-    description: description.trim(),
-    createdAt: isoNow,
-    updatedAt: isoNow,
-    files: [],
-  };
+  return data.repo;
 }
 
-/** Delete a repository and all its Storage files */
-export async function deleteRepo(uid: string, repoId: string): Promise<void> {
-  // 1. Fetch all file sub-docs so we can delete their Storage objects
-  const filesSnap = await getDocs(filesCol(uid, repoId));
-
-  await Promise.all(
-    filesSnap.docs.map(async (f) => {
-      const { storagePath } = f.data();
-      // Delete from Storage (best-effort — don't fail the whole op if missing)
-      try {
-        await deleteObject(ref(storage, storagePath));
-      } catch {
-        /* file may already be gone */
-      }
-      // Delete Firestore sub-doc
-      await deleteDoc(fileDoc(uid, repoId, f.id));
-    })
-  );
-
-  // 2. Delete the repo doc itself
-  await deleteDoc(repoDoc(uid, repoId));
+export async function deleteRepo(
+  _uid: string,
+  repoId: string
+): Promise<void> {
+  await apiFetch<{ ok: true }>(`/api/repos/${encodeURIComponent(repoId)}`, {
+    method: "DELETE",
+  });
 }
 
-// ── File operations ──────────────────────────────────────────────────────────
-
-/**
- * Upload one File to Storage and write its metadata to Firestore.
- * Returns a Promise<RepoFile> that resolves when the upload is complete.
- * Calls `onProgress(tempId, 0-100)` while uploading.
- */
 export function uploadFile(
-  uid: string,
+  _uid: string,
   repoId: string,
   file: File,
   onProgress?: UploadProgressCallback
 ): { tempId: string; promise: Promise<RepoFile> } {
-  const tempId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  const fileRef = doc(filesCol(uid, repoId)); // auto-id Firestore doc
-  const fileId = fileRef.id;
-  const storagePath = `repos/${uid}/${repoId}/${fileId}/${file.name}`;
-  const storageRef = ref(storage, storagePath);
+  const tempId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  const promise = new Promise<RepoFile>((resolve, reject) => {
-    const task = uploadBytesResumable(storageRef, file, {
-      contentType: file.type,
-    });
+  const promise = idToken().then(
+    (token) =>
+      new Promise<RepoFile>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(
+          "POST",
+          `/api/repos/${encodeURIComponent(repoId)}/files`
+        );
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
-    task.on(
-      "state_changed",
-      (snap) => {
-        const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
-        onProgress?.(tempId, pct);
-      },
-      reject,
-      async () => {
-        try {
-          const downloadUrl = await getDownloadURL(storageRef);
-          const uploadedAt = serverTimestamp();
+        xhr.upload.onprogress = (event) => {
+          if (!event.lengthComputable) return;
+          const progress = Math.round((event.loaded / event.total) * 100);
+          onProgress?.(tempId, Math.min(progress, 99));
+        };
 
-          await setDoc(fileRef, {
-            name: file.name,
-            size: file.size,
-            type: file.type || "application/octet-stream",
-            storagePath,
-            downloadUrl,
-            uploadedAt,
-          });
+        xhr.onerror = () => reject(new Error("Upload connection failed."));
+        xhr.onload = () => {
+          let data: { file?: RepoFile; error?: string } = {};
+          try {
+            data = JSON.parse(xhr.responseText) as typeof data;
+          } catch {
+            // The status-specific error below is clearer than a JSON parse error.
+          }
 
-          // Bump repo updatedAt
-          await setDoc(
-            repoDoc(uid, repoId),
-            { updatedAt: uploadedAt },
-            { merge: true }
-          );
+          if (xhr.status < 200 || xhr.status >= 300 || !data.file) {
+            reject(new Error(data.error ?? `Upload failed (${xhr.status}).`));
+            return;
+          }
 
-          resolve({
-            id: fileId,
-            name: file.name,
-            size: file.size,
-            type: file.type || "application/octet-stream",
-            storagePath,
-            downloadUrl,
-            uploadedAt: new Date().toISOString(),
-          });
-        } catch (err) {
-          reject(err);
-        }
-      }
-    );
-  });
+          onProgress?.(tempId, 100);
+          resolve(data.file);
+        };
+
+        const form = new FormData();
+        form.append("file", file);
+        xhr.send(form);
+      })
+  );
 
   return { tempId, promise };
 }
 
-/** Delete a single file from Storage + Firestore */
 export async function removeFile(
-  uid: string,
+  _uid: string,
   repoId: string,
   fileId: string,
   storagePath: string
 ): Promise<void> {
-  try {
-    await deleteObject(ref(storage, storagePath));
-  } catch {
-    /* already deleted */
-  }
-  await deleteDoc(fileDoc(uid, repoId, fileId));
-
-  // Bump repo updatedAt
-  await setDoc(
-    repoDoc(uid, repoId),
-    { updatedAt: serverTimestamp() },
-    { merge: true }
+  void storagePath;
+  await apiFetch<{ ok: true }>(
+    `/api/repos/${encodeURIComponent(repoId)}/files/${encodeURIComponent(fileId)}`,
+    { method: "DELETE" }
   );
+}
+
+export async function openRepoFile(
+  repoId: string,
+  fileId: string,
+  fileName: string
+): Promise<void> {
+  const token = await idToken();
+  const response = await fetch(
+    `/api/repos/${encodeURIComponent(repoId)}/files/${encodeURIComponent(fileId)}/download`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.ok) {
+    const data = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error ?? "Failed to open file.");
+  }
+
+  const blobUrl = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = blobUrl;
+  anchor.download = fileName;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
 }

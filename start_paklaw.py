@@ -167,6 +167,10 @@ def main() -> int:
 
     env = clean_env(os.environ.copy())
     env.setdefault("NEXT_PUBLIC_AI_API_URL", f"http://127.0.0.1:{args.backend_port}")
+    env.setdefault(
+        "PAKLAW_REPOSITORY_DIR",
+        str(FRONTEND_DIR / "local-data" / "repositories"),
+    )
 
     backend: subprocess.Popen[str] | None = None
     frontend: subprocess.Popen[str] | None = None

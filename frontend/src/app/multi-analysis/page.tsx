@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { analyzeMultipleFiles } from "@/lib/aiClient";
 import {
   Upload,
   X,
@@ -14,10 +15,9 @@ import {
 
 const MAX_FILES = 7;
 const MIN_FILES = 2;
-const ACCEPTED = [".pdf", ".doc", ".docx", ".txt"];
+const ACCEPTED = [".pdf", ".docx", ".txt"];
 const ACCEPTED_MIME = [
   "application/pdf",
-  "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain",
 ];
@@ -118,16 +118,29 @@ export default function MultiAnalysisPage() {
     e.target.value = "";
   };
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     if (uploadedFiles.length < MIN_FILES) {
       setError(`Please upload at least ${MIN_FILES} files to compare.`);
       return;
     }
     setError("");
     setIsAnalyzing(true);
-    setTimeout(() => {
+    sessionStorage.removeItem("paklaw_latest_analysis");
+    try {
+      const result = await analyzeMultipleFiles(
+        uploadedFiles.map((item) => item.file),
+        30
+      );
+      sessionStorage.setItem("paklaw_latest_analysis", JSON.stringify(result));
       router.push("/report");
-    }, 1800);
+    } catch (analysisError) {
+      const message =
+        analysisError instanceof Error
+          ? analysisError.message
+          : "Multi-file analysis failed.";
+      setError(`${message} Make sure the backend is running on port 8001.`);
+      setIsAnalyzing(false);
+    }
   };
 
   const slots = MAX_FILES - uploadedFiles.length;

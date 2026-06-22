@@ -14,8 +14,7 @@ import {
   verifyBeforeUpdateEmail,
   User as FirebaseUser,
 } from "firebase/auth";
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
 
 interface AppUser {
   uid: string;
@@ -50,26 +49,14 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-/** Fetch the user's Firestore profile and merge with Firebase Auth data */
+/** Build the application profile from Firebase Authentication data. */
 async function buildAppUser(fbUser: FirebaseUser): Promise<AppUser> {
-  try {
-    const snap = await getDoc(doc(db, "users", fbUser.uid));
-    const data = snap.data();
-    return {
-      uid: fbUser.uid,
-      name: fbUser.displayName ?? data?.name ?? "User",
-      email: fbUser.email ?? "",
-      emailVerified: fbUser.emailVerified,
-    };
-  } catch {
-    // Doc may not exist yet (race during signup) — fall back to Auth data only
-    return {
-      uid: fbUser.uid,
-      name: fbUser.displayName ?? "User",
-      email: fbUser.email ?? "",
-      emailVerified: fbUser.emailVerified,
-    };
-  }
+  return {
+    uid: fbUser.uid,
+    name: fbUser.displayName ?? "User",
+    email: fbUser.email ?? "",
+    emailVerified: fbUser.emailVerified,
+  };
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -127,20 +114,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
 
-      // Best-effort: set display name + Firestore profile + verification email.
-      // If any of these fail, the account is still created — don't block signup.
+      // Best-effort: set the display name and send the verification email.
+      // If either fails, the Firebase Auth account still exists.
       try {
         await fbUpdateProfile(cred.user, { displayName: name });
       } catch (e) { console.warn("[signup] displayName update failed:", e); }
-
-      try {
-        await setDoc(doc(db, "users", cred.user.uid), {
-          name,
-          email,
-          role: "user",
-          createdAt: serverTimestamp(),
-        });
-      } catch (e) { console.warn("[signup] Firestore write failed:", e); }
 
       try {
         await sendEmailVerification(cred.user);
@@ -167,8 +145,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const fbUser = auth.currentUser;
       if (!fbUser) return { ok: false, error: "Not authenticated." };
       await fbUpdateProfile(fbUser, { displayName: name });
-      // Use merge so it works even if the Firestore doc doesn't exist yet
-      await setDoc(doc(db, "users", fbUser.uid), { name }, { merge: true });
       setUser((prev) => (prev ? { ...prev, name } : prev));
       return { ok: true };
     } catch (err: unknown) {
