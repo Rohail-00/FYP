@@ -1,0 +1,12 @@
+{
+  "pdf_count": 1036,
+  "chunk_count": 34419,
+  "failed_pdf_count": 1,
+  "failures": [
+    {
+      "file": "PDF-Files\\Industrial Development Bank of Pakistan Ordinance, 1961(Repeal by ord.XXXViii of 2009,s.14(w.e.f 17-09-2007 upto 25-03-2010)).pdf",
+      "error": "Stream has ended unexpectedly"
+    }
+  ],
+  "index_path": "C:\\1-FYP\\backend\\data\\law_index.joblib"
+}

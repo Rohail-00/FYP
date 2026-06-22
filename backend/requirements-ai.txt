@@ -1,0 +1,6 @@
+torch
+transformers
+sentence-transformers
+huggingface-hub
+z3-solver
+dateparser

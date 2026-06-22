@@ -8,133 +8,175 @@ import React, {
   useCallback,
 } from "react";
 import { useAuth } from "@/context/AuthContext";
+import {
+  fetchRepos,
+  createRepo as svcCreate,
+  deleteRepo as svcDelete,
+  uploadFile as svcUpload,
+  removeFile as svcRemove,
+  Repository,
+  RepoFile,
+} from "@/lib/repoService";
 
-// ── Types ──────────────────────────────────────────────────────────────────
+// ── Re-export types so page imports still work ──────────────────────────────
+export type { Repository, RepoFile };
 
-export interface RepoFile {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  uploadedAt: string;
+// ── Upload-progress tracking ─────────────────────────────────────────────────
+export interface UploadEntry {
+  tempId: string;
+  fileName: string;
+  repoId: string;
+  progress: number; // 0-100
+  error?: string;
 }
 
-export interface Repository {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: string;
-  files: RepoFile[];
-}
-
+// ── Context shape ────────────────────────────────────────────────────────────
 interface RepoContextType {
   repos: Repository[];
-  createRepo: (name: string, description: string) => Repository;
-  deleteRepo: (repoId: string) => void;
+  isLoading: boolean;
+  uploads: UploadEntry[];         // in-flight uploads
+
+  createRepo: (name: string, description: string) => Promise<Repository>;
+  deleteRepo: (repoId: string) => Promise<void>;
   addFilesToRepo: (repoId: string, files: File[]) => void;
-  removeFileFromRepo: (repoId: string, fileId: string) => void;
+  removeFileFromRepo: (repoId: string, fileId: string, storagePath: string) => Promise<void>;
+  refreshRepos: () => Promise<void>;
 }
 
-// ── Context ────────────────────────────────────────────────────────────────
-
+// ── Context ──────────────────────────────────────────────────────────────────
 const RepoContext = createContext<RepoContextType | undefined>(undefined);
-
-function storageKey(uid: string) {
-  return `pak_repos_${uid}`;
-}
 
 export const RepoProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const { user } = useAuth();
+  const uid = user?.uid ?? null;
+
   const [repos, setRepos] = useState<Repository[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [uploads, setUploads] = useState<UploadEntry[]>([]);
 
-  // Load from localStorage when user changes
-  useEffect(() => {
-    if (!user?.uid) {
-      setRepos([]);
-      return;
-    }
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  const loadRepos = useCallback(async () => {
+    if (!uid) { setRepos([]); return; }
+    setIsLoading(true);
     try {
-      const raw = localStorage.getItem(storageKey(user.uid));
-      setRepos(raw ? JSON.parse(raw) : []);
-    } catch {
-      setRepos([]);
+      const data = await fetchRepos(uid);
+      setRepos(data);
+    } catch (err) {
+      console.error("[RepoContext] fetchRepos failed:", err);
+    } finally {
+      setIsLoading(false);
     }
-  }, [user?.uid]);
+  }, [uid]);
 
-  // Persist to localStorage on every change
-  const persist = useCallback(
-    (updated: Repository[]) => {
-      if (!user?.uid) return;
-      localStorage.setItem(storageKey(user.uid), JSON.stringify(updated));
-      setRepos(updated);
-    },
-    [user?.uid]
-  );
+  // Reload repos whenever the signed-in user changes
+  useEffect(() => {
+    loadRepos();
+  }, [loadRepos]);
+
+  // ── CRUD ───────────────────────────────────────────────────────────────────
 
   const createRepo = useCallback(
-    (name: string, description: string): Repository => {
-      const repo: Repository = {
-        id: `repo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        name: name.trim(),
-        description: description.trim(),
-        createdAt: new Date().toISOString(),
-        files: [],
-      };
-      persist([...repos, repo]);
+    async (name: string, description: string): Promise<Repository> => {
+      if (!uid) throw new Error("Not authenticated");
+      const repo = await svcCreate(uid, name, description);
+      setRepos((prev) => [repo, ...prev]);
       return repo;
     },
-    [repos, persist]
+    [uid]
   );
 
   const deleteRepo = useCallback(
-    (repoId: string) => {
-      persist(repos.filter((r) => r.id !== repoId));
+    async (repoId: string): Promise<void> => {
+      if (!uid) throw new Error("Not authenticated");
+      await svcDelete(uid, repoId);
+      setRepos((prev) => prev.filter((r) => r.id !== repoId));
     },
-    [repos, persist]
+    [uid]
   );
+
+  // ── File uploads ───────────────────────────────────────────────────────────
 
   const addFilesToRepo = useCallback(
     (repoId: string, files: File[]) => {
-      const newFiles: RepoFile[] = files.map((f) => ({
-        id: `file_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        name: f.name,
-        size: f.size,
-        type: f.type,
-        uploadedAt: new Date().toISOString(),
-      }));
+      if (!uid) return;
 
-      persist(
-        repos.map((r) =>
-          r.id === repoId ? { ...r, files: [...r.files, ...newFiles] } : r
-        )
-      );
+      files.forEach((file) => {
+        const { tempId, promise } = svcUpload(
+          uid,
+          repoId,
+          file,
+          (tid, pct) => {
+            setUploads((prev) =>
+              prev.map((u) => (u.tempId === tid ? { ...u, progress: pct } : u))
+            );
+          }
+        );
+
+        // Register upload entry
+        setUploads((prev) => [
+          ...prev,
+          { tempId, fileName: file.name, repoId, progress: 0 },
+        ]);
+
+        promise
+          .then((repoFile: RepoFile) => {
+            // Append new file into the right repo in state
+            setRepos((prev) =>
+              prev.map((r) =>
+                r.id === repoId
+                  ? { ...r, files: [...r.files, repoFile] }
+                  : r
+              )
+            );
+            // Remove upload entry
+            setUploads((prev) => prev.filter((u) => u.tempId !== tempId));
+          })
+          .catch((err) => {
+            console.error("[RepoContext] upload failed:", err);
+            setUploads((prev) =>
+              prev.map((u) =>
+                u.tempId === tempId
+                  ? { ...u, error: "Upload failed. Please retry." }
+                  : u
+              )
+            );
+          });
+      });
     },
-    [repos, persist]
+    [uid]
   );
 
   const removeFileFromRepo = useCallback(
-    (repoId: string, fileId: string) => {
-      persist(
-        repos.map((r) =>
+    async (repoId: string, fileId: string, storagePath: string): Promise<void> => {
+      if (!uid) throw new Error("Not authenticated");
+      await svcRemove(uid, repoId, fileId, storagePath);
+      setRepos((prev) =>
+        prev.map((r) =>
           r.id === repoId
             ? { ...r, files: r.files.filter((f) => f.id !== fileId) }
             : r
         )
       );
     },
-    [repos, persist]
+    [uid]
   );
+
+  const refreshRepos = useCallback(() => loadRepos(), [loadRepos]);
 
   return (
     <RepoContext.Provider
       value={{
         repos,
+        isLoading,
+        uploads,
         createRepo,
         deleteRepo,
         addFilesToRepo,
         removeFileFromRepo,
+        refreshRepos,
       }}
     >
       {children}

@@ -1,1 +1,7 @@
 paklaw-*.json
+__pycache__/
+*.py[cod]
+.next/
+frontend/.next/
+backend/models/
+backend/data/*.tmp

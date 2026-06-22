@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useRepo } from "@/context/RepoContext";
-import { Repository } from "@/context/RepoContext";
+import type { Repository } from "@/context/RepoContext";
 import {
   FolderOpen,
   Plus,
@@ -15,7 +15,14 @@ import {
   ChevronDown,
   ChevronUp,
   Database,
+  RefreshCw,
+  ExternalLink,
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
 } from "lucide-react";
+
+// ── Formatters ───────────────────────────────────────────────────────────────
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -31,95 +38,213 @@ function formatDate(iso: string): string {
   });
 }
 
+function fileIcon(type: string): string {
+  if (type.includes("pdf")) return "📄";
+  if (type.includes("word") || type.includes("document")) return "📝";
+  if (type.includes("text")) return "📃";
+  return "📎";
+}
+
+// ── Upload progress bar ──────────────────────────────────────────────────────
+
+function ProgressBar({ pct }: { pct: number }) {
+  return (
+    <div
+      style={{
+        height: "4px",
+        background: "var(--bg-tertiary)",
+        borderRadius: "2px",
+        overflow: "hidden",
+        marginTop: "4px",
+      }}
+    >
+      <div
+        style={{
+          height: "100%",
+          width: `${pct}%`,
+          background: "var(--accent)",
+          borderRadius: "2px",
+          transition: "width 0.3s ease",
+        }}
+      />
+    </div>
+  );
+}
+
+// ── Main page ────────────────────────────────────────────────────────────────
+
 export default function RepositoriesPage() {
-  const { isAuthenticated, isLoading } = useAuth();
-  const { repos, createRepo, deleteRepo, addFilesToRepo, removeFileFromRepo } =
-    useRepo();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const {
+    repos,
+    isLoading: reposLoading,
+    uploads,
+    createRepo,
+    deleteRepo,
+    addFilesToRepo,
+    removeFileFromRepo,
+    refreshRepos,
+  } = useRepo();
   const router = useRouter();
 
-  // Create repo form state
+  // ── local UI state ────────────────────────────────────────────────────────
+
   const [newRepoName, setNewRepoName] = useState("");
   const [newRepoDesc, setNewRepoDesc] = useState("");
   const [createError, setCreateError] = useState("");
+  const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
 
-  // Track which repo cards are expanded
   const [expandedRepos, setExpandedRepos] = useState<Set<string>>(new Set());
-
-  // Delete confirmation
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [removingFileId, setRemovingFileId] = useState<string | null>(null);
 
-  // Per-repo file input refs
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
+  // ── Auth guard ────────────────────────────────────────────────────────────
+
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push("/login");
-    }
-  }, [isAuthenticated, isLoading, router]);
+    if (!authLoading && !isAuthenticated) router.push("/login");
+  }, [isAuthenticated, authLoading, router]);
 
-  if (isLoading || !isAuthenticated) {
-    return (
-      <main className="main-content">
-        <div className="container text-center" style={{ paddingTop: "4rem" }}>
-          <p style={{ color: "var(--text-secondary)" }}>Loading session...</p>
-        </div>
-      </main>
-    );
-  }
+  // ── Toast helper ──────────────────────────────────────────────────────────
 
-  const handleCreateRepo = (e: React.FormEvent) => {
+  const showToast = useCallback((msg: string, ok = true) => {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  const handleCreateRepo = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRepoName.trim()) {
-      setCreateError("Repository name is required.");
-      return;
-    }
-    if (repos.some((r) => r.name.toLowerCase() === newRepoName.trim().toLowerCase())) {
+    const trimmed = newRepoName.trim();
+    if (!trimmed) { setCreateError("Repository name is required."); return; }
+    if (repos.some((r) => r.name.toLowerCase() === trimmed.toLowerCase())) {
       setCreateError("A repository with this name already exists.");
       return;
     }
-    const repo = createRepo(newRepoName, newRepoDesc);
-    setNewRepoName("");
-    setNewRepoDesc("");
+
+    setCreating(true);
     setCreateError("");
-    setShowCreateForm(false);
-    // Auto-expand the new repo
-    setExpandedRepos((prev) => new Set([...prev, repo.id]));
+    try {
+      const repo = await createRepo(trimmed, newRepoDesc.trim());
+      setNewRepoName("");
+      setNewRepoDesc("");
+      setShowCreateForm(false);
+      setExpandedRepos((prev) => new Set([...prev, repo.id]));
+      showToast(`Repository "${repo.name}" created.`);
+    } catch {
+      setCreateError("Failed to create repository. Please try again.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDeleteRepo = async (repoId: string) => {
+    setDeletingId(repoId);
+    try {
+      await deleteRepo(repoId);
+      setConfirmDelete(null);
+      showToast("Repository deleted.");
+    } catch {
+      showToast("Failed to delete repository.", false);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const handleFileUpload = (repoId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    if (files.length > 0) {
-      addFilesToRepo(repoId, files);
-    }
-    // Reset input so same file can be re-uploaded
-    if (fileInputRefs.current[repoId]) {
-      fileInputRefs.current[repoId]!.value = "";
+    if (files.length === 0) return;
+    addFilesToRepo(repoId, files);
+    showToast(`Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`);
+    if (fileInputRefs.current[repoId]) fileInputRefs.current[repoId]!.value = "";
+  };
+
+  const handleRemoveFile = async (repoId: string, fileId: string, storagePath: string) => {
+    setRemovingFileId(fileId);
+    try {
+      await removeFileFromRepo(repoId, fileId, storagePath);
+      showToast("File removed.");
+    } catch {
+      showToast("Failed to remove file.", false);
+    } finally {
+      setRemovingFileId(null);
     }
   };
 
   const toggleExpand = (repoId: string) => {
     setExpandedRepos((prev) => {
       const next = new Set(prev);
-      if (next.has(repoId)) next.delete(repoId);
-      else next.add(repoId);
+      if (next.has(repoId)) {
+        next.delete(repoId);
+      } else {
+        next.add(repoId);
+      }
       return next;
     });
   };
 
-  const fileIcon = (type: string) => {
-    if (type.includes("pdf")) return "📄";
-    if (type.includes("word") || type.includes("document")) return "📝";
-    return "📃";
-  };
+  // ── In-flight uploads for a specific repo ─────────────────────────────────
+
+  const repoUploads = (repoId: string) =>
+    uploads.filter((u) => u.repoId === repoId);
+
+  // ── Loading states ────────────────────────────────────────────────────────
+
+  if (authLoading || !isAuthenticated) {
+    return (
+      <main className="main-content">
+        <div className="container text-center" style={{ paddingTop: "4rem" }}>
+          <p style={{ color: "var(--text-secondary)" }}>Loading session…</p>
+        </div>
+      </main>
+    );
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <main className="main-content">
+      {/* ── Toast notification ── */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "1.5rem",
+            right: "1.5rem",
+            zIndex: 500,
+            background: toast.ok ? "var(--severity-low-bg)" : "var(--severity-high-bg)",
+            border: `1px solid ${toast.ok ? "var(--severity-low-border)" : "var(--severity-high-border)"}`,
+            color: toast.ok ? "var(--severity-low)" : "var(--severity-high)",
+            padding: "0.75rem 1.25rem",
+            borderRadius: "var(--radius-md)",
+            fontSize: "0.85rem",
+            fontWeight: 500,
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            boxShadow: "var(--shadow-lg)",
+            animation: "repoSlideIn 0.2s ease",
+            maxWidth: "340px",
+          }}
+        >
+          {toast.ok
+            ? <CheckCircle2 size={15} />
+            : <AlertCircle size={15} />}
+          {toast.msg}
+        </div>
+      )}
+
       <div
         className="container"
-        style={{ maxWidth: "800px", paddingTop: "3rem", paddingBottom: "4rem" }}
+        style={{ maxWidth: "820px", paddingTop: "3rem", paddingBottom: "4rem" }}
       >
-        {/* ── Page Header ── */}
+        {/* ── Page header ── */}
         <div
           className="flex justify-between items-center mb-6"
           style={{ flexWrap: "wrap", gap: "1rem" }}
@@ -140,22 +265,42 @@ export default function RepositoriesPage() {
               My Repositories
             </h1>
             <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-              Organise your documents into repositories to scope consistency
-              checks.
+              Organise documents into repositories to scope consistency checks.
             </p>
           </div>
-          <button
-            id="create-repo-btn"
-            className="btn btn-primary"
-            style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}
-            onClick={() => setShowCreateForm((v) => !v)}
-          >
-            <Plus size={16} />
-            New Repository
-          </button>
+
+          <div className="flex items-center" style={{ gap: "0.5rem" }}>
+            {/* Refresh */}
+            <button
+              id="refresh-repos-btn"
+              className="btn btn-secondary"
+              title="Refresh"
+              style={{ padding: "0.5rem 0.7rem" }}
+              onClick={() => refreshRepos()}
+              disabled={reposLoading}
+            >
+              <RefreshCw
+                size={15}
+                style={{
+                  animation: reposLoading ? "spin 1s linear infinite" : "none",
+                }}
+              />
+            </button>
+
+            {/* New repo */}
+            <button
+              id="create-repo-btn"
+              className="btn btn-primary"
+              style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}
+              onClick={() => setShowCreateForm((v) => !v)}
+            >
+              <Plus size={16} />
+              New Repository
+            </button>
+          </div>
         </div>
 
-        {/* ── Create Repo Form ── */}
+        {/* ── Create form ── */}
         {showCreateForm && (
           <div
             className="card mb-6"
@@ -165,13 +310,7 @@ export default function RepositoriesPage() {
               borderWidth: "1.5px",
             }}
           >
-            <h2
-              style={{
-                fontSize: "1rem",
-                fontWeight: 600,
-                marginBottom: "1rem",
-              }}
-            >
+            <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" }}>
               Create New Repository
             </h2>
             <form onSubmit={handleCreateRepo} className="flex flex-col gap-4">
@@ -185,14 +324,12 @@ export default function RepositoriesPage() {
                   className="form-input"
                   placeholder="e.g. University Regulations, Company Policy"
                   value={newRepoName}
-                  onChange={(e) => {
-                    setNewRepoName(e.target.value);
-                    setCreateError("");
-                  }}
+                  onChange={(e) => { setNewRepoName(e.target.value); setCreateError(""); }}
                   maxLength={80}
                   autoFocus
                 />
               </div>
+
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label htmlFor="repo-desc" className="form-label">
                   Description{" "}
@@ -208,17 +345,13 @@ export default function RepositoriesPage() {
                   maxLength={200}
                 />
               </div>
+
               {createError && (
-                <p
-                  style={{
-                    color: "var(--severity-high)",
-                    fontSize: "0.82rem",
-                    fontWeight: 500,
-                  }}
-                >
+                <p style={{ color: "var(--severity-high)", fontSize: "0.82rem", fontWeight: 500 }}>
                   {createError}
                 </p>
               )}
+
               <div className="flex gap-2" style={{ justifyContent: "flex-end" }}>
                 <button
                   type="button"
@@ -236,51 +369,69 @@ export default function RepositoriesPage() {
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  style={{ padding: "0.55rem 1.1rem", fontSize: "0.85rem" }}
+                  style={{
+                    padding: "0.55rem 1.1rem",
+                    fontSize: "0.85rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.4rem",
+                  }}
+                  disabled={creating}
                 >
-                  Create Repository
+                  {creating && <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />}
+                  {creating ? "Creating…" : "Create Repository"}
                 </button>
               </div>
             </form>
           </div>
         )}
 
-        {/* ── Empty State ── */}
-        {repos.length === 0 && (
+        {/* ── Loading skeleton ── */}
+        {reposLoading && repos.length === 0 && (
           <div
             className="card text-center"
             style={{ padding: "4rem 2rem", color: "var(--text-muted)" }}
           >
-            <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>
-              <FolderOpen size={56} strokeWidth={1} style={{ margin: "0 auto", opacity: 0.35 }} />
-            </div>
+            <Loader2
+              size={32}
+              style={{ margin: "0 auto 1rem", animation: "spin 1s linear infinite" }}
+            />
+            <p style={{ fontSize: "0.85rem" }}>Loading your repositories…</p>
+          </div>
+        )}
+
+        {/* ── Empty state ── */}
+        {!reposLoading && repos.length === 0 && (
+          <div
+            className="card text-center"
+            style={{ padding: "4rem 2rem", color: "var(--text-muted)" }}
+          >
+            <FolderOpen size={56} strokeWidth={1} style={{ margin: "0 auto 1rem", opacity: 0.35 }} />
             <p style={{ fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.35rem" }}>
               No repositories yet
             </p>
             <p style={{ fontSize: "0.85rem" }}>
-              Create a repository and upload your documents to scope analysis
-              checks.
+              Create a repository and upload your documents to scope analysis checks.
             </p>
           </div>
         )}
 
-        {/* ── Repo Cards ── */}
+        {/* ── Repo cards ── */}
         <div className="flex flex-col" style={{ gap: "1rem" }}>
           {repos.map((repo: Repository) => {
             const isExpanded = expandedRepos.has(repo.id);
             const isConfirming = confirmDelete === repo.id;
+            const isDeleting = deletingId === repo.id;
+            const inFlightUploads = repoUploads(repo.id);
+            const totalFiles = repo.files.length + inFlightUploads.length;
 
             return (
               <div
                 key={repo.id}
                 className="card"
-                style={{
-                  padding: 0,
-                  overflow: "hidden",
-                  transition: "var(--transition)",
-                }}
+                style={{ padding: 0, overflow: "hidden", transition: "var(--transition)" }}
               >
-                {/* Card Header */}
+                {/* ── Card header ── */}
                 <div
                   style={{
                     display: "flex",
@@ -291,6 +442,7 @@ export default function RepositoriesPage() {
                   }}
                   onClick={() => toggleExpand(repo.id)}
                 >
+                  {/* Folder icon */}
                   <div
                     style={{
                       width: "40px",
@@ -305,6 +457,8 @@ export default function RepositoriesPage() {
                   >
                     <FolderOpen size={20} strokeWidth={1.8} style={{ color: "var(--accent)" }} />
                   </div>
+
+                  {/* Name + meta */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p
                       style={{
@@ -319,25 +473,23 @@ export default function RepositoriesPage() {
                       {repo.name}
                     </p>
                     <p style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                      {repo.files.length} file{repo.files.length !== 1 ? "s" : ""} ·{" "}
+                      {totalFiles} file{totalFiles !== 1 ? "s" : ""} ·{" "}
                       Created {formatDate(repo.createdAt)}
                     </p>
                   </div>
+
+                  {/* Action buttons — stop propagation so they don't toggle expand */}
                   <div
                     className="flex items-center"
                     style={{ gap: "0.5rem", flexShrink: 0 }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {/* Add Files */}
+                    {/* Add files */}
                     <button
                       id={`add-files-btn-${repo.id}`}
                       className="btn btn-secondary"
                       title="Add files"
-                      style={{
-                        padding: "0.4rem 0.8rem",
-                        fontSize: "0.78rem",
-                        gap: "0.3rem",
-                      }}
+                      style={{ padding: "0.4rem 0.8rem", fontSize: "0.78rem", gap: "0.3rem" }}
                       onClick={() => fileInputRefs.current[repo.id]?.click()}
                     >
                       <Upload size={13} />
@@ -348,13 +500,11 @@ export default function RepositoriesPage() {
                       accept=".pdf,.doc,.docx,.txt"
                       multiple
                       style={{ display: "none" }}
-                      ref={(el) => {
-                        fileInputRefs.current[repo.id] = el;
-                      }}
+                      ref={(el) => { fileInputRefs.current[repo.id] = el; }}
                       onChange={(e) => handleFileUpload(repo.id, e)}
                     />
 
-                    {/* Delete repo */}
+                    {/* Delete */}
                     {!isConfirming ? (
                       <button
                         id={`delete-repo-btn-${repo.id}`}
@@ -366,16 +516,16 @@ export default function RepositoriesPage() {
                           borderColor: "var(--severity-high-border)",
                         }}
                         onClick={() => setConfirmDelete(repo.id)}
+                        disabled={isDeleting}
                       >
-                        <Trash2 size={14} />
+                        {isDeleting
+                          ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                          : <Trash2 size={14} />
+                        }
                       </button>
                     ) : (
                       <div className="flex items-center" style={{ gap: "0.35rem" }}>
-                        <span
-                          style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}
-                        >
-                          Delete?
-                        </span>
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Delete?</span>
                         <button
                           className="btn btn-secondary"
                           style={{
@@ -384,12 +534,14 @@ export default function RepositoriesPage() {
                             color: "var(--severity-high)",
                             borderColor: "var(--severity-high-border)",
                             background: "var(--severity-high-bg)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.3rem",
                           }}
-                          onClick={() => {
-                            deleteRepo(repo.id);
-                            setConfirmDelete(null);
-                          }}
+                          onClick={() => handleDeleteRepo(repo.id)}
+                          disabled={isDeleting}
                         >
+                          {isDeleting && <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />}
                           Yes
                         </button>
                         <button
@@ -402,21 +554,14 @@ export default function RepositoriesPage() {
                       </div>
                     )}
 
-                    {/* Expand chevron */}
-                    <div
-                      style={{ cursor: "pointer", color: "var(--text-muted)" }}
-                      onClick={() => toggleExpand(repo.id)}
-                    >
-                      {isExpanded ? (
-                        <ChevronUp size={16} />
-                      ) : (
-                        <ChevronDown size={16} />
-                      )}
+                    {/* Chevron */}
+                    <div style={{ color: "var(--text-muted)" }}>
+                      {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                     </div>
                   </div>
                 </div>
 
-                {/* Description */}
+                {/* ── Description ── */}
                 {repo.description && (
                   <div
                     style={{
@@ -431,7 +576,7 @@ export default function RepositoriesPage() {
                   </div>
                 )}
 
-                {/* Expanded: Files list */}
+                {/* ── Expanded file list ── */}
                 {isExpanded && (
                   <div
                     style={{
@@ -441,7 +586,50 @@ export default function RepositoriesPage() {
                       animation: "repoSlideIn 0.18s ease",
                     }}
                   >
-                    {repo.files.length === 0 ? (
+                    {/* In-flight uploads */}
+                    {inFlightUploads.length > 0 && (
+                      <div className="flex flex-col" style={{ gap: "0.5rem", marginBottom: "0.75rem" }}>
+                        {inFlightUploads.map((u) => (
+                          <div
+                            key={u.tempId}
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              padding: "0.6rem 0.9rem",
+                              background: "var(--bg-primary)",
+                              borderRadius: "var(--radius-md)",
+                              border: "1px solid var(--border-light)",
+                              fontSize: "0.82rem",
+                            }}
+                          >
+                            <div className="flex items-center" style={{ gap: "0.6rem" }}>
+                              {u.error
+                                ? <AlertCircle size={14} style={{ color: "var(--severity-high)", flexShrink: 0 }} />
+                                : <Loader2 size={14} style={{ animation: "spin 1s linear infinite", color: "var(--accent)", flexShrink: 0 }} />
+                              }
+                              <span
+                                style={{
+                                  flex: 1,
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  color: u.error ? "var(--severity-high)" : "var(--text-secondary)",
+                                }}
+                              >
+                                {u.error ? u.error : u.fileName}
+                              </span>
+                              <span style={{ color: "var(--text-muted)", flexShrink: 0, fontSize: "0.75rem" }}>
+                                {u.error ? "Failed" : `${u.progress}%`}
+                              </span>
+                            </div>
+                            {!u.error && <ProgressBar pct={u.progress} />}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Completed files */}
+                    {repo.files.length === 0 && inFlightUploads.length === 0 ? (
                       <div
                         style={{
                           textAlign: "center",
@@ -450,22 +638,14 @@ export default function RepositoriesPage() {
                           fontSize: "0.85rem",
                         }}
                       >
-                        <FileText
-                          size={32}
-                          strokeWidth={1}
-                          style={{ margin: "0 auto 0.5rem", opacity: 0.4 }}
-                        />
+                        <FileText size={32} strokeWidth={1} style={{ margin: "0 auto 0.5rem", opacity: 0.4 }} />
                         <p>No files yet. Click &ldquo;Add Files&rdquo; to upload documents.</p>
                       </div>
                     ) : (
-                      <div
-                        className="flex flex-col"
-                        style={{ gap: "0.5rem" }}
-                      >
+                      <div className="flex flex-col" style={{ gap: "0.5rem" }}>
                         {repo.files.map((file) => (
                           <div
                             key={file.id}
-                            className="repo-file-row"
                             style={{
                               display: "flex",
                               alignItems: "center",
@@ -480,6 +660,7 @@ export default function RepositoriesPage() {
                             <span style={{ fontSize: "1.1rem", flexShrink: 0 }}>
                               {fileIcon(file.type)}
                             </span>
+
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <p
                                 style={{
@@ -496,13 +677,39 @@ export default function RepositoriesPage() {
                                 {formatBytes(file.size)} · {formatDate(file.uploadedAt)}
                               </p>
                             </div>
+
+                            {/* Download link */}
+                            {file.downloadUrl && (
+                              <a
+                                href={file.downloadUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Open file"
+                                style={{
+                                  color: "var(--text-muted)",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  padding: "0.2rem",
+                                  borderRadius: "var(--radius-sm)",
+                                  transition: "var(--transition)",
+                                  flexShrink: 0,
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent)")}
+                                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+                              >
+                                <ExternalLink size={14} />
+                              </a>
+                            )}
+
+                            {/* Remove file */}
                             <button
                               title="Remove file"
-                              onClick={() => removeFileFromRepo(repo.id, file.id)}
+                              onClick={() => handleRemoveFile(repo.id, file.id, file.storagePath)}
+                              disabled={removingFileId === file.id}
                               style={{
                                 background: "none",
                                 border: "none",
-                                cursor: "pointer",
+                                cursor: removingFileId === file.id ? "not-allowed" : "pointer",
                                 color: "var(--text-muted)",
                                 display: "flex",
                                 alignItems: "center",
@@ -511,14 +718,16 @@ export default function RepositoriesPage() {
                                 transition: "var(--transition)",
                                 flexShrink: 0,
                               }}
-                              onMouseEnter={(e) =>
-                                (e.currentTarget.style.color = "var(--severity-high)")
-                              }
-                              onMouseLeave={(e) =>
-                                (e.currentTarget.style.color = "var(--text-muted)")
-                              }
+                              onMouseEnter={(e) => {
+                                if (removingFileId !== file.id)
+                                  e.currentTarget.style.color = "var(--severity-high)";
+                              }}
+                              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
                             >
-                              <X size={15} />
+                              {removingFileId === file.id
+                                ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                                : <X size={15} />
+                              }
                             </button>
                           </div>
                         ))}

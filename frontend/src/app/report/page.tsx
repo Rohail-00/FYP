@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import type { AnalysisResult } from "@/lib/aiClient";
 
 interface ReportItem {
   id: string;
@@ -23,6 +24,7 @@ export default function ReportPage() {
 
   const [filter, setFilter] = useState<"all" | "high" | "medium" | "low">("all");
   const [selectedReport, setSelectedReport] = useState<ReportItem | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
 
   const reports: ReportItem[] = [
     {
@@ -100,6 +102,15 @@ export default function ReportPage() {
     }
   }, [isAuthenticated, isLoading, router]);
 
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem("paklaw_latest_analysis");
+      if (stored) setAnalysis(JSON.parse(stored) as AnalysisResult);
+    } catch {
+      setAnalysis(null);
+    }
+  }, []);
+
   const filteredReports = reports.filter((item) => {
     if (filter === "all") return true;
     return item.severity === filter;
@@ -120,6 +131,204 @@ export default function ReportPage() {
       <main className="main-content">
         <div className="container text-center" style={{ paddingTop: "4rem" }}>
           <p style={{ color: "var(--text-secondary)" }}>Loading session...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (analysis) {
+    const dynamicReports: ReportItem[] = analysis.comparisons.map((item) => {
+      const confidence = Math.round(item.decision.confidence * 100);
+      const severity =
+        item.decision.resultType === "contradiction"
+          ? "high"
+          : item.decision.resultType === "possible_conflict"
+            ? "medium"
+            : "low";
+      const badgeText =
+        item.decision.resultType === "contradiction"
+          ? "Contradiction"
+          : item.decision.resultType === "possible_conflict"
+            ? "Possible Conflict"
+            : item.decision.resultType === "consistent_or_related"
+              ? "Related/Consistent"
+              : "Uncertain";
+
+      return {
+        id: item.candidate.id,
+        title: `${item.candidate.title} — page ${item.candidate.pageStart}`,
+        severity,
+        badgeText,
+        percentage: `${confidence}%`,
+        shortDesc: item.decision.reasons.join("; "),
+        proposedDraft: analysis.draft,
+        activeStatute: item.candidate.text,
+        heuristics: `Experts: ${analysis.summary.routedExperts.join(", ")}. Signals: numeric mismatch=${item.decision.expertSignals?.numericMismatch ?? false}, negation mismatch=${item.decision.expertSignals?.negationMismatch ?? false}, date mismatch=${item.decision.expertSignals?.dateMismatch ?? false}, semantic overlap=${item.decision.expertSignals?.semanticOverlap ?? item.decision.semanticOverlap}. Matrix: ${analysis.summary.evaluationMatrix}. Source: ${item.candidate.file}`,
+      };
+    });
+
+    const dynamicFiltered = dynamicReports.filter((item) => {
+      if (filter === "all") return true;
+      return item.severity === filter;
+    });
+    const dynamicHigh = dynamicReports.filter((r) => r.severity === "high").length;
+    const dynamicMedium = dynamicReports.filter((r) => r.severity === "medium").length;
+    const dynamicLow = dynamicReports.filter((r) => r.severity === "low").length;
+
+    return (
+      <main className="main-content">
+        <div className="container" style={{ paddingTop: "3rem", paddingBottom: "3rem" }}>
+          <div className="flex justify-between items-center mb-6" style={{ flexWrap: "wrap", gap: "1rem" }}>
+            <div>
+              <h1 style={{ fontSize: "1.75rem", fontWeight: 700, letterSpacing: "-0.02em", marginBottom: "0.25rem" }}>
+                Analysis Report
+              </h1>
+              <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+                Real AI backend result from {analysis.summary.knowledgeBase ?? "Pakistan Code PDF Index"}: {analysis.summary.candidateCount} retrieved clauses, {analysis.summary.contradictionCount} contradiction(s), confidence {Math.round(analysis.summary.confidence * 100)}%.
+              </p>
+            </div>
+
+            <Link href="/check" className="btn btn-secondary" style={{ fontSize: "0.85rem" }}>
+              Run New Check
+            </Link>
+          </div>
+
+          <div className="card mb-6" style={{ padding: "1rem 1.25rem" }}>
+            <p style={{ fontSize: "0.82rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+              Routed Experts
+            </p>
+            <div className="flex" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+              {analysis.summary.routedExperts.map((expert) => (
+                <span key={expert} className="badge badge-low">
+                  {expert}
+                </span>
+              ))}
+            </div>
+            {analysis.repositorySearch && (
+              <p style={{ marginTop: "0.75rem", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                Repository scan: {analysis.repositorySearch.chunkCount} searchable chunks
+                {typeof analysis.repositorySearch.indexedFileCount === "number"
+                  ? ` from ${analysis.repositorySearch.indexedFileCount} file${analysis.repositorySearch.indexedFileCount !== 1 ? "s" : ""}`
+                  : ""}
+                {analysis.repositorySearch.failures.length > 0
+                  ? `; ${analysis.repositorySearch.failures.length} file${analysis.repositorySearch.failures.length !== 1 ? "s" : ""} could not be searched.`
+                  : "."}
+              </p>
+            )}
+            {analysis.part2Pipeline && (
+              <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border-light)", paddingTop: "0.9rem" }}>
+                <p style={{ fontSize: "0.82rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+                  Part 2 Multi-Expert Trace
+                </p>
+                <div className="flex flex-col" style={{ gap: "0.5rem" }}>
+                  {analysis.part2Pipeline.expertTrace.map((trace) => (
+                    <div
+                      key={`${trace.name}-${trace.status}`}
+                      style={{
+                        padding: "0.65rem 0.75rem",
+                        border: "1px solid var(--border-light)",
+                        borderRadius: "var(--radius-md)",
+                        background: "var(--bg-secondary)",
+                      }}
+                    >
+                      <p style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                        {trace.name}
+                      </p>
+                      <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.15rem" }}>
+                        {trace.model} - {trace.status.replaceAll("_", " ")}
+                      </p>
+                      <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: "0.35rem" }}>
+                        {trace.output}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: "0.75rem" }}>
+                  <strong style={{ color: "var(--text-primary)" }}>Aggregation:</strong>{" "}
+                  {analysis.part2Pipeline.aggregation.debateSummary}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="filter-bar">
+            <button className={`filter-btn ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>
+              All ({dynamicReports.length})
+            </button>
+            <button className={`filter-btn ${filter === "high" ? "active" : ""}`} onClick={() => setFilter("high")}>
+              High ({dynamicHigh})
+            </button>
+            <button className={`filter-btn ${filter === "medium" ? "active" : ""}`} onClick={() => setFilter("medium")}>
+              Medium ({dynamicMedium})
+            </button>
+            <button className={`filter-btn ${filter === "low" ? "active" : ""}`} onClick={() => setFilter("low")}>
+              Low ({dynamicLow})
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            {dynamicFiltered.map((report) => (
+              <div key={report.id} className="report-card" onClick={() => setSelectedReport(report)}>
+                <div className="report-header">
+                  <div>
+                    <span className={getBadgeClass(report.severity)} style={{ marginBottom: "0.5rem" }}>
+                      {report.badgeText} ({report.percentage})
+                    </span>
+                    <h3 style={{ fontSize: "1rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                      {report.title}
+                    </h3>
+                  </div>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedReport(report);
+                    }}
+                    style={{ padding: "0.35rem 0.75rem", fontSize: "0.8rem" }}
+                  >
+                    Details
+                  </button>
+                </div>
+                <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                  {report.shortDesc}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className={`modal-overlay ${selectedReport ? "active" : ""}`} onClick={() => setSelectedReport(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close-btn" onClick={() => setSelectedReport(null)}>
+              &times;
+            </button>
+            {selectedReport && (
+              <>
+                <div className="modal-header">
+                  <span className={getBadgeClass(selectedReport.severity)}>
+                    {selectedReport.badgeText} ({selectedReport.percentage})
+                  </span>
+                  <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--text-primary)", marginTop: "0.5rem" }}>
+                    {selectedReport.title}
+                  </h2>
+                </div>
+                <div className="clause-comparison">
+                  <div className="clause-panel">
+                    <strong>Draft Clause</strong>
+                    <p>&quot;{selectedReport.proposedDraft}&quot;</p>
+                  </div>
+                  <div className="clause-panel">
+                    <strong>Retrieved Active Law Clause</strong>
+                    <p>&quot;{selectedReport.activeStatute}&quot;</p>
+                  </div>
+                  <div style={{ gridColumn: "1 / -1", fontSize: "0.8rem", borderTop: "1px solid var(--border-light)", paddingTop: "0.75rem" }}>
+                    <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Reasoning:</span>{" "}
+                    {selectedReport.heuristics}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </main>
     );

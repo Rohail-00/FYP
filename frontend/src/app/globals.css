@@ -655,6 +655,11 @@ body {
   background-color: var(--bg-tertiary) !important;
 }
 
+/* Spin utility — pairs with @keyframes spin above */
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 /* Select element inherits form-input styles */
 select.form-input {
   appearance: none;

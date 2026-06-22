@@ -1,0 +1,45 @@
+{
+  "cache_dir": "backend/models",
+  "profiles": {
+    "demo": [
+      {
+        "id": "BAAI/bge-small-en-v1.5",
+        "purpose": "Fast embedding model for semantic law retrieval"
+      },
+      {
+        "id": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        "purpose": "Lightweight cross-encoder reranker for retrieved law clauses"
+      },
+      {
+        "id": "nlpaueb/legal-bert-base-uncased",
+        "purpose": "Legal-domain encoder slot for Part 2 semantic/legal context experiments"
+      }
+    ],
+    "full": [
+      {
+        "id": "BAAI/bge-small-en-v1.5",
+        "purpose": "Embedding model for semantic retrieval"
+      },
+      {
+        "id": "BAAI/bge-reranker-base",
+        "purpose": "Stronger reranker for law-clause candidates"
+      },
+      {
+        "id": "nlpaueb/legal-bert-base-uncased",
+        "purpose": "Legal-domain encoder for statutes and legal language"
+      },
+      {
+        "id": "microsoft/deberta-v3-base",
+        "purpose": "General language/deontic classification fine-tuning base"
+      },
+      {
+        "id": "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
+        "purpose": "NLI entailment, contradiction, neutral classifier"
+      },
+      {
+        "id": "google/flan-t5-base",
+        "purpose": "Instruction model slot for numeric/date/logical explanation experiments"
+      }
+    ]
+  }
+}

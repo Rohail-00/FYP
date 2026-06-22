@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useRepo } from "@/context/RepoContext";
+import { analyzeDraft, analyzeRepositoryDraft } from "@/lib/aiClient";
 import { Database, AlertCircle } from "lucide-react";
 
 const ACCEPTED = [".pdf", ".doc", ".docx", ".txt"];
@@ -26,6 +27,7 @@ export default function CheckPage() {
   // Form & upload state
   const [draftText, setDraftText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState("");
   
@@ -74,6 +76,7 @@ export default function CheckPage() {
     if (!isAccepted) {
       setError("Only PDF, DOCX, and TXT files are accepted.");
       setFileName(null);
+      setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -81,11 +84,23 @@ export default function CheckPage() {
     if (file.size > MAX_FILE_SIZE) {
       setError("File exceeds the 10 MB limit.");
       setFileName(null);
+      setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
     setFileName(file.name);
+    setSelectedFile(file);
+
+    if (file.type === "text/plain" || file.name.toLowerCase().endsWith(".txt")) {
+      file.text()
+        .then((text) => {
+          if (!draftText.trim()) setDraftText(text.trim());
+        })
+        .catch(() => {
+          setError("TXT file was selected, but its text could not be read.");
+        });
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,21 +148,53 @@ export default function CheckPage() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    if (!draftText.trim() && !fileName) {
+    if (!draftText.trim() && !selectedFile) {
       setError("Please provide either draft clause text or upload a document file.");
       return;
     }
 
-    setIsSubmitting(true);
-    setSubmitBtnText("Running Neural-Symbolic Check...");
+    if (!draftText.trim()) {
+      setError("PDF/DOCX direct extraction is not active on this page yet. Upload those files to a repository, or paste clause text here.");
+      return;
+    }
 
-    setTimeout(() => {
+    setIsSubmitting(true);
+    setSubmitBtnText("Running retrieval + model routing...");
+
+    try {
+      const activeRepo = repos.find((repo) => repo.id === selectedRepo);
+      if (activeRepo && activeRepo.files.length === 0) {
+        setError("Selected repository is empty. Upload files or switch back to all Pak Law PDFs.");
+        setIsSubmitting(false);
+        setSubmitBtnText("Analyze for Inconsistencies");
+        return;
+      }
+
+      const result = activeRepo
+        ? await analyzeRepositoryDraft(
+            draftText.trim(),
+            activeRepo.files.map((file) => ({
+              id: file.id,
+              name: file.name,
+              type: file.type,
+              downloadUrl: file.downloadUrl,
+            })),
+            activeRepo.name,
+            5
+          )
+        : await analyzeDraft(draftText.trim(), 5);
+      sessionStorage.setItem("paklaw_latest_analysis", JSON.stringify(result));
       router.push("/report");
-    }, 1500);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "AI backend is not reachable.";
+      setError(`${message} Make sure backend/server.py is running on port 8001.`);
+      setIsSubmitting(false);
+      setSubmitBtnText("Analyze for Inconsistencies");
+    }
   };
 
   if (isLoading || !isAuthenticated) {
